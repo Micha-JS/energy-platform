@@ -1,17 +1,26 @@
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.0
+  # ruff and mypy run through the uv-locked environment so pre-commit and CI
+  # (which runs `uv run ruff` / `uv run mypy`) share a single version source: uv.lock.
+  - repo: local
     hooks:
-      - id: ruff
-        args: [--fix]
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
       - id: ruff-format
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.14.0
-    hooks:
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
       - id: mypy
-        additional_dependencies: [dagster, dagster-postgres, psycopg]
-        args: [--config-file=pyproject.toml]
-        files: ^(src|tests)/
+        name: mypy
+        entry: uv run mypy src tests
+        language: system
+        pass_filenames: false
+        always_run: true
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:

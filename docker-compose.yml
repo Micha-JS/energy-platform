@@ -25,6 +25,19 @@ services:
     ports:
       - "5432:5432"
 
+  # One-shot schema bootstrap: creates/migrates the Dagster tables once, before the
+  # long-lived services connect, so webserver and daemon don't race on first boot.
+  dagster_init:
+    build: .
+    command: dagster instance migrate
+    environment: *dagster-env
+    volumes:
+      - ./dagster.yaml:/opt/dagster/home/dagster.yaml:ro
+      - ./workspace.yaml:/opt/dagster/home/workspace.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   dagster_webserver:
     build: .
     command: dagster-webserver -h 0.0.0.0 -p 3000 -w /opt/dagster/home/workspace.yaml
@@ -35,8 +48,8 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      postgres:
-        condition: service_healthy
+      dagster_init:
+        condition: service_completed_successfully
 
   dagster_daemon:
     build: .
@@ -46,8 +59,8 @@ services:
       - ./dagster.yaml:/opt/dagster/home/dagster.yaml:ro
       - ./workspace.yaml:/opt/dagster/home/workspace.yaml:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      dagster_init:
+        condition: service_completed_successfully
 
 volumes:
   pgdata:

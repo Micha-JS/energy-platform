@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.11.14 /uv /bin/uv
 
 ENV DAGSTER_HOME=/opt/dagster/home \
     PATH="/app/.venv/bin:$PATH" \
@@ -17,3 +17,8 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY README.md ./
 COPY src ./src
 RUN uv sync --frozen --no-dev
+
+# Run as a non-root user so an exploit in the exposed webserver can't act as root.
+RUN useradd --create-home --uid 1000 dagster \
+    && chown -R dagster:dagster /opt/dagster /app
+USER dagster
