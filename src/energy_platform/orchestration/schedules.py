@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from dagster import (
     DefaultScheduleStatus,
     RunRequest,
@@ -34,19 +36,30 @@ daily_market_data_schedule = build_schedule_from_partitioned_job(
 )
 
 
-# -- Weather actuals: settled truth, so materialise the day that just closed -----------
+# -- Weather actuals: settled truth, but ERA5 settles late -----------------------------
 
 weather_actuals_job = define_asset_job(
     name="weather_actuals_job",
     selection=[open_meteo_weather_actuals_raw],
 )
 
-daily_weather_actuals_schedule = build_schedule_from_partitioned_job(
-    weather_actuals_job,
-    hour_of_day=6,
-    minute_of_hour=30,
+# The Open-Meteo archive is ERA5-backed and only finalises a few days after the fact, so a
+# schedule chasing yesterday (D-1) would perpetually fetch data that doesn't exist yet and
+# leave failing/empty partitions until a manual re-run. Lag the target day past that horizon;
+# missed days in between are re-materialised when their lag elapses (or by a manual backfill).
+ARCHIVE_LAG_DAYS = 5
+
+
+@schedule(
+    job=weather_actuals_job,
+    cron_schedule="30 6 * * *",
+    execution_timezone=PARTITION_TIMEZONE,
     default_status=DefaultScheduleStatus.RUNNING,
 )
+def daily_weather_actuals_schedule(context: ScheduleEvaluationContext) -> RunRequest:
+    """Materialise the most recent Berlin day the ERA5 archive is expected to have settled."""
+    target_day = context.scheduled_execution_time.date() - timedelta(days=ARCHIVE_LAG_DAYS)
+    return RunRequest(partition_key=target_day.isoformat())
 
 
 # -- Weather forecast: a vintage of the future, so materialise TODAY's issue date ------

@@ -10,6 +10,7 @@ proven no-op (matching content hashes).
 
 from collections import Counter
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 from dagster import (
     AssetExecutionContext,
@@ -22,6 +23,7 @@ from energy_platform.connectors.open_meteo import WEATHER_VARIABLES
 from energy_platform.connectors.types import Dataset, Resolution
 from energy_platform.orchestration.ingest import ingest_forecast_vintage, ingest_partition
 from energy_platform.orchestration.partitions import (
+    PARTITION_TIMEZONE,
     daily_de_partitions,
     daily_forecast_partitions,
     daily_weather_partitions,
@@ -195,16 +197,20 @@ def open_meteo_weather_forecast_raw(
     issue_day = partition_key_to_date(context.partition_key)
     site_id = open_meteo_forecast.default_site_id
     issue_time = datetime.now(UTC)
+    # Partition keys are Berlin calendar days, so compare against the Berlin-local date of the
+    # issue instant -- not its UTC date, which straddles a different day around local midnight
+    # and would flag a legitimately-today vintage as mislabelled.
+    issue_local_day = issue_time.astimezone(ZoneInfo(PARTITION_TIMEZONE)).date()
 
     # The forecast API only serves the current issue: materialising an old issue date would
     # store today's forecast mislabelled. Warn rather than fabricate a past vintage.
-    if issue_day != issue_time.date():
+    if issue_day != issue_local_day:
         context.log.warning(
-            "forecast partition %s materialised on %s (UTC): the API returns the CURRENT "
-            "forecast, so this vintage reflects today's issue, not %s. Forecasts accrue "
+            "forecast partition %s materialised on %s (Europe/Berlin): the API returns the "
+            "CURRENT forecast, so this vintage reflects today's issue, not %s. Forecasts accrue "
             "forward only and cannot be backfilled.",
             issue_day.isoformat(),
-            issue_time.date().isoformat(),
+            issue_local_day.isoformat(),
             issue_day.isoformat(),
         )
 

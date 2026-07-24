@@ -24,8 +24,9 @@ from energy_platform.orchestration.schedules import (
 
 _config = AppConfig.from_env()
 
-# site id -> [lat, lon] for the Dagster-config-friendly resource fields.
-_coordinates = {site.id: [site.latitude, site.longitude] for site in _config.site.sites}
+# site id -> [lat, lon] for the Dagster-config-friendly resource fields (Dagster config wants
+# JSON-native lists, so widen the shared (lat, lon) tuples to lists here).
+_coordinates = {site_id: [lat, lon] for site_id, (lat, lon) in _config.site.coordinates.items()}
 
 defs = Definitions(
     assets=[*market_data_assets, *weather_assets],

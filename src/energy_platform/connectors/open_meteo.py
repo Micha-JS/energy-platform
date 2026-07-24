@@ -180,7 +180,10 @@ class OpenMeteoArchiveClient(_OpenMeteoBase):
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         super().__init__(http, base_url, coordinates, max_retries=max_retries, sleep=sleep)
-        # Memoised per (site, start_date, end_date); holds all variables for that range.
+        # Memoises only the most recently fetched (site, start_date, end_date) range and all its
+        # variables. That is the only reuse that matters -- the six variables of a single day
+        # share one range -- so a long multi-year backfill stays flat in memory instead of
+        # retaining every day it has ever fetched.
         self._cache: dict[tuple[str, str, str], dict[Dataset, tuple[Point, ...]]] = {}
 
     def fetch_window(
@@ -218,6 +221,8 @@ class OpenMeteoArchiveClient(_OpenMeteoBase):
         params = _archive_params(lat, lon, start_date, end_date)
         data = self._get_json(self._base_url, params)
         series = self._parse_hourly(data, WEATHER_VARIABLES)
+        # Retain only this range; a new range evicts the previous one (see ``_cache`` note).
+        self._cache.clear()
         self._cache[key] = series
         return series
 
@@ -281,6 +286,11 @@ def _hourly_params(lat: float, lon: float) -> dict[str, Any]:
         "hourly": ",".join(variable.value for variable in WEATHER_VARIABLES),
         "timezone": "UTC",
         "timeformat": "unixtime",
+        # Pin units so the stored series matches its documented ``Dataset`` unit regardless of
+        # the API's defaults: wind in m/s (default is km/h -- 3.6x larger) and temperature in
+        # degrees Celsius. See the unit annotations on ``Dataset``.
+        "wind_speed_unit": "ms",
+        "temperature_unit": "celsius",
     }
 
 

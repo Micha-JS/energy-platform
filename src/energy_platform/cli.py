@@ -157,8 +157,16 @@ def _run_backfill(args: argparse.Namespace) -> int:
         for processed, day in enumerate(days, start=1):
             for dataset in datasets:
                 client, region = routes[dataset]
+                # Weather actuals are always hourly regardless of --resolution (which only
+                # governs SMARD's quarter-hour series); forcing it keeps the stored resolution
+                # label and expected_count honest instead of mislabelling weather as quarterhour.
+                dataset_resolution = (
+                    Resolution.HOUR if dataset in _WEATHER_DATASETS else resolution
+                )
                 try:
-                    result = ingest_partition(client, repo, dataset, region, resolution, day)
+                    result = ingest_partition(
+                        client, repo, dataset, region, dataset_resolution, day
+                    )
                 except Exception:
                     failures += 1
                     logger.exception("Failed to ingest %s %s", dataset.value, day)
@@ -210,10 +218,9 @@ def _build_routes(
                 headers={"User-Agent": OPEN_METEO_USER_AGENT, "Accept": "application/json"},
             )
         )
-        coordinates = {site.id: (site.latitude, site.longitude) for site in config.site.sites}
         archive = OpenMeteoArchiveClient(
             http,
-            coordinates,
+            config.site.coordinates,
             base_url=config.open_meteo.archive_url,
             max_retries=config.open_meteo.max_retries,
         )
@@ -227,7 +234,7 @@ def _build_routes(
 def _run_forecast_snapshot(args: argparse.Namespace) -> int:
     config = AppConfig.from_env()
     site_id = args.site or config.site.default_id
-    coordinates = {site.id: (site.latitude, site.longitude) for site in config.site.sites}
+    coordinates = config.site.coordinates
     # The as-of instant is now; the issue date is today in the partition calendar's timezone.
     issue_time = datetime.now(UTC)
     issue_day = datetime.now(ZoneInfo(PARTITION_TIMEZONE)).date()

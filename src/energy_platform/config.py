@@ -151,9 +151,10 @@ class SiteConfig:
         return cls(sites=(site,), default_id=site.id)
 
     @property
-    def mapping(self) -> dict[str, Site]:
-        """Site id -> :class:`Site`, for the connectors' coordinate lookup."""
-        return {site.id: site for site in self.sites}
+    def coordinates(self) -> dict[str, tuple[float, float]]:
+        """Site id -> ``(latitude, longitude)`` -- the single source of the map the connectors
+        (and the Dagster resources) resolve coordinates from, so no call site rebuilds it."""
+        return {site.id: (site.latitude, site.longitude) for site in self.sites}
 
     @property
     def default(self) -> Site:
