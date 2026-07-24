@@ -1,0 +1,53 @@
+name: energy-platform
+
+x-dagster-env: &dagster-env
+  DAGSTER_HOME: /opt/dagster/home
+  DAGSTER_POSTGRES_HOST: postgres
+  DAGSTER_POSTGRES_PORT: "5432"
+  DAGSTER_POSTGRES_USER: dagster
+  DAGSTER_POSTGRES_PASSWORD: dagster
+  DAGSTER_POSTGRES_DB: dagster
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: dagster
+      POSTGRES_PASSWORD: dagster
+      POSTGRES_DB: dagster
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dagster -d dagster"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  dagster_webserver:
+    build: .
+    command: dagster-webserver -h 0.0.0.0 -p 3000 -w /opt/dagster/home/workspace.yaml
+    environment: *dagster-env
+    volumes:
+      - ./dagster.yaml:/opt/dagster/home/dagster.yaml:ro
+      - ./workspace.yaml:/opt/dagster/home/workspace.yaml:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  dagster_daemon:
+    build: .
+    command: dagster-daemon run -w /opt/dagster/home/workspace.yaml
+    environment: *dagster-env
+    volumes:
+      - ./dagster.yaml:/opt/dagster/home/dagster.yaml:ro
+      - ./workspace.yaml:/opt/dagster/home/workspace.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
