@@ -10,7 +10,11 @@ dependencies = [
     "dagster-webserver>=1.10,<1.11",
     "dagster-postgres>=0.26,<0.27",
     "psycopg[binary]>=3.2,<4",
+    "httpx>=0.27,<0.29",
 ]
+
+[project.scripts]
+energy-platform = "energy_platform.cli:main"
 
 [dependency-groups]
 dev = [
@@ -56,3 +60,6 @@ ignore_missing_imports = true
 minversion = "8.0"
 testpaths = ["tests"]
 addopts = "-ra -q"
+markers = [
+    "postgres: requires a live Postgres database (raw-zone integration tests)",
+]

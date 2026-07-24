@@ -8,6 +8,22 @@ on:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    services:
+      # Real Postgres so the raw-zone idempotency/no-op tests actually execute in CI.
+      # SMARD itself is served from recorded fixtures -- no live API calls here.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: dagster
+          POSTGRES_PASSWORD: dagster
+          POSTGRES_DB: dagster
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dagster -d dagster"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
@@ -27,6 +43,15 @@ jobs:
         run: uv run mypy src tests
       - name: pytest
         run: uv run pytest
+        env:
+          # Fail (don't skip) the raw-zone tests if this service Postgres is unreachable --
+          # the whole point of the container is that those tests actually run in CI.
+          ENERGY_REQUIRE_POSTGRES: "1"
+          ENERGY_PG_HOST: localhost
+          ENERGY_PG_PORT: "5432"
+          ENERGY_PG_USER: dagster
+          ENERGY_PG_PASSWORD: dagster
+          ENERGY_PG_DB: dagster
 
   compose-validate:
     runs-on: ubuntu-latest
