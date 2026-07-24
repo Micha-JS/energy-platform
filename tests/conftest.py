@@ -16,10 +16,14 @@ import psycopg
 import pytest
 
 from energy_platform.config import PostgresConfig
+from energy_platform.connectors.open_meteo import OpenMeteoArchiveClient, OpenMeteoForecastClient
 from energy_platform.connectors.smard import SmardClient
 from energy_platform.orchestration.raw_zone import RawZoneRepository
 
 FIXTURES_DIR = Path(__file__).parent / "connectors" / "fixtures"
+
+# The site the offline weather fixtures were recorded for (Berlin, rounded to 2 dp).
+FIXTURE_COORDINATES = {"home": (52.52, 13.40)}
 
 
 def _fixture_name(url: httpx.URL) -> str:
@@ -54,6 +58,59 @@ def smard_client() -> Iterator[SmardClient]:
     """A :class:`SmardClient` served from recorded fixtures (no network, no retries)."""
     with httpx.Client(transport=smard_mock_transport()) as http:
         yield SmardClient(http, max_retries=0, sleep=lambda _: None)
+
+
+def _open_meteo_fixture_name(url: httpx.URL) -> str | None:
+    """Map an Open-Meteo request URL to its fixture filename.
+
+    Archive requests key off their ``start_date`` / ``end_date`` query; the forecast endpoint
+    has a single current-snapshot fixture.
+    """
+    if url.path.endswith("/archive"):
+        start = url.params.get("start_date")
+        end = url.params.get("end_date")
+        return f"open_meteo_archive_{start}_{end}.json"
+    if url.path.endswith("/forecast"):
+        return "open_meteo_forecast.json"
+    return None
+
+
+def open_meteo_mock_transport() -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        name = _open_meteo_fixture_name(request.url)
+        if name is None:
+            return httpx.Response(404, text=f"unroutable Open-Meteo URL: {request.url}")
+        path = FIXTURES_DIR / name
+        if not path.exists():
+            return httpx.Response(404, text=f"no fixture: {path.name}")
+        return httpx.Response(
+            200,
+            content=path.read_bytes(),
+            headers={"content-type": "application/json"},
+        )
+
+    return httpx.MockTransport(handler)
+
+
+@pytest.fixture
+def open_meteo_archive_client() -> Iterator[OpenMeteoArchiveClient]:
+    """An archive client served from offline fixtures (no network, no retries)."""
+    with httpx.Client(transport=open_meteo_mock_transport()) as http:
+        yield OpenMeteoArchiveClient(http, FIXTURE_COORDINATES, max_retries=0, sleep=lambda _: None)
+
+
+@pytest.fixture
+def open_meteo_forecast_client() -> Iterator[OpenMeteoForecastClient]:
+    """A forecast client served from offline fixtures (no network, no retries)."""
+    with httpx.Client(transport=open_meteo_mock_transport()) as http:
+        yield OpenMeteoForecastClient(
+            http,
+            FIXTURE_COORDINATES,
+            forecast_days=7,
+            past_days=1,
+            max_retries=0,
+            sleep=lambda _: None,
+        )
 
 
 @pytest.fixture

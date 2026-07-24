@@ -1,11 +1,15 @@
-"""Daily-partitioned Dagster assets for SMARD market data.
+"""Daily-partitioned Dagster assets for SMARD market data and Open-Meteo weather.
 
-Both assets are thin wrappers over :func:`ingest_partition`; the CLI drives the same core,
-so a Dagster backfill over a range the CLI already loaded shows green partitions and is a
+Every asset is a thin wrapper over the shared ingestion core (:func:`ingest_partition` for
+settled series, :func:`ingest_forecast_vintage` for forecast vintages); the CLI drives the same
+core, so a Dagster backfill over a range the CLI already loaded shows green partitions and is a
 proven no-op (matching content hashes).
 """
 # NB: no ``from __future__ import annotations`` here -- Dagster resolves the ``context``
 # parameter annotation at runtime, and stringized annotations break inside the factory.
+
+from collections import Counter
+from datetime import UTC, datetime
 
 from dagster import (
     AssetExecutionContext,
@@ -14,13 +18,18 @@ from dagster import (
     asset,
 )
 
+from energy_platform.connectors.open_meteo import WEATHER_VARIABLES
 from energy_platform.connectors.types import Dataset, Resolution
-from energy_platform.orchestration.ingest import ingest_partition
+from energy_platform.orchestration.ingest import ingest_forecast_vintage, ingest_partition
 from energy_platform.orchestration.partitions import (
     daily_de_partitions,
+    daily_forecast_partitions,
+    daily_weather_partitions,
     partition_key_to_date,
 )
 from energy_platform.orchestration.resources import (
+    OpenMeteoArchiveClientResource,
+    OpenMeteoForecastClientResource,
     RawZonePostgresResource,
     SmardClientResource,
 )
@@ -99,3 +108,142 @@ smard_grid_load_raw = _build_asset(
 )
 
 market_data_assets = [smard_day_ahead_price_raw, smard_grid_load_raw]
+
+
+# -- Weather (Open-Meteo) --------------------------------------------------------------
+
+
+@asset(
+    name="open_meteo_weather_actuals_raw",
+    description=(
+        "Open-Meteo historical weather actuals (irradiance, temperature, cloud cover, wind) "
+        "for the site, hourly in UTC, one Europe/Berlin day per partition. Each variable is "
+        "ingested as its own series, stored append-only in the raw zone alongside prices."
+    ),
+    partitions_def=daily_weather_partitions,
+    group_name="weather",
+    kinds={"python", "postgres"},
+)
+def open_meteo_weather_actuals_raw(
+    context: AssetExecutionContext,
+    open_meteo_archive: OpenMeteoArchiveClientResource,
+    raw_zone: RawZonePostgresResource,
+) -> MaterializeResult:
+    day = partition_key_to_date(context.partition_key)
+    site_id = open_meteo_archive.default_site_id
+
+    outcomes: Counter[str] = Counter()
+    row_total = 0
+    null_total = 0
+    # One HTTP call covers every variable (memoised in the client); we ingest each as its own
+    # single-valued series so the raw zone and content hashing stay unchanged from M1.
+    with raw_zone.get_repository() as repo, open_meteo_archive.get_client() as client:
+        for variable in WEATHER_VARIABLES:
+            result = ingest_partition(
+                client,
+                repo,
+                variable,
+                site_id,
+                RESOLUTION,
+                day,
+                dagster_run_id=context.run_id,
+            )
+            outcomes[result.outcome.value] += 1
+            row_total += result.row_count
+            null_total += result.null_count
+
+    context.log.info(
+        "weather actuals %s @ %s: %d variables (%s), %d rows, %d null",
+        day.isoformat(),
+        site_id,
+        len(WEATHER_VARIABLES),
+        dict(outcomes),
+        row_total,
+        null_total,
+    )
+    return MaterializeResult(
+        metadata={
+            "site": site_id,
+            "variable_count": len(WEATHER_VARIABLES),
+            "loaded": outcomes.get("loaded", 0),
+            "noop": outcomes.get("noop", 0),
+            "revision": outcomes.get("revision", 0),
+            "row_count": row_total,
+            "null_count": null_total,
+            "all_noop": row_total > 0 and outcomes.get("noop", 0) == len(WEATHER_VARIABLES),
+        }
+    )
+
+
+@asset(
+    name="open_meteo_weather_forecast_raw",
+    description=(
+        "Open-Meteo forecast horizon for the site, captured daily as an immutable vintage "
+        "keyed by issue date. Append-only, never collapsed to 'latest' -- so backtests can "
+        "reconstruct exactly what was forecast at decision time. Only the current issue date "
+        "is materialisable; past forecast partitions cannot be backfilled."
+    ),
+    partitions_def=daily_forecast_partitions,
+    group_name="weather",
+    kinds={"python", "postgres"},
+)
+def open_meteo_weather_forecast_raw(
+    context: AssetExecutionContext,
+    open_meteo_forecast: OpenMeteoForecastClientResource,
+    raw_zone: RawZonePostgresResource,
+) -> MaterializeResult:
+    issue_day = partition_key_to_date(context.partition_key)
+    site_id = open_meteo_forecast.default_site_id
+    issue_time = datetime.now(UTC)
+
+    # The forecast API only serves the current issue: materialising an old issue date would
+    # store today's forecast mislabelled. Warn rather than fabricate a past vintage.
+    if issue_day != issue_time.date():
+        context.log.warning(
+            "forecast partition %s materialised on %s (UTC): the API returns the CURRENT "
+            "forecast, so this vintage reflects today's issue, not %s. Forecasts accrue "
+            "forward only and cannot be backfilled.",
+            issue_day.isoformat(),
+            issue_time.date().isoformat(),
+            issue_day.isoformat(),
+        )
+
+    with raw_zone.get_repository() as repo, open_meteo_forecast.get_client() as client:
+        result = ingest_forecast_vintage(
+            client,
+            repo,
+            site_id,
+            RESOLUTION,
+            issue_day,
+            issue_time,
+            dagster_run_id=context.run_id,
+        )
+
+    context.log.info(
+        "weather forecast vintage %s @ %s: %s (%d rows across %d variables, %d null, %dd horizon)",
+        issue_day.isoformat(),
+        site_id,
+        result.outcome.value,
+        result.row_count,
+        result.variable_count,
+        result.null_count,
+        result.horizon_days,
+    )
+    return MaterializeResult(
+        metadata={
+            "site": site_id,
+            "issue_date": issue_day.isoformat(),
+            "issue_time": issue_time.isoformat(),
+            "outcome": result.outcome.value,
+            "is_noop": result.is_noop,
+            "content_hash": result.content_hash,
+            "row_count": result.row_count,
+            "variable_count": result.variable_count,
+            "null_count": result.null_count,
+            "horizon_days": result.horizon_days,
+            "has_missing": result.has_missing,
+        }
+    )
+
+
+weather_assets = [open_meteo_weather_actuals_raw, open_meteo_weather_forecast_raw]

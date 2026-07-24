@@ -17,6 +17,19 @@ from urllib.parse import quote
 DEFAULT_SMARD_BASE_URL = "https://www.smard.de/app/chart_data"
 DEFAULT_RAW_SCHEMA = "raw"
 
+# Public Open-Meteo API base URLs (no API key required, CC BY 4.0).
+DEFAULT_OPEN_METEO_ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+DEFAULT_OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+DEFAULT_FORECAST_DAYS = 7
+
+# The site's coordinates, rounded to ~2 decimal places (~1 km) so the public repo never
+# reveals a precise address. These rounded literals are the ONLY coordinates anywhere in the
+# repo -- there is no precise copy in a gitignored file to leak. Berlin city centre by
+# default; override per deployment via ENERGY_SITE_LAT / ENERGY_SITE_LON.
+DEFAULT_SITE_ID = "home"
+DEFAULT_SITE_LATITUDE = 52.52
+DEFAULT_SITE_LONGITUDE = 13.40
+
 
 def _env(*names: str, default: str) -> str:
     """Return the first *set* environment variable among ``names``, else ``default``.
@@ -104,12 +117,95 @@ class SmardConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class Site:
+    """A physical location weather is ingested for, identified by a short id.
+
+    The ``id`` is used as the raw-zone ``region`` for weather rows, exactly as ``"DE"`` is
+    for market data -- so a weather series is keyed by *where* without ever storing a precise
+    address. Coordinates are rounded to ~2 dp; see the module-level note.
+    """
+
+    id: str
+    latitude: float
+    longitude: float
+
+
+@dataclass(frozen=True, slots=True)
+class SiteConfig:
+    """The site(s) weather is ingested for.
+
+    A single default site today, held in a tuple so more can be added without touching the
+    connectors, which resolve coordinates by site id.
+    """
+
+    sites: tuple[Site, ...]
+    default_id: str
+
+    @classmethod
+    def from_env(cls) -> SiteConfig:
+        site = Site(
+            id=_env("ENERGY_SITE_ID", default=DEFAULT_SITE_ID),
+            latitude=_env_float("ENERGY_SITE_LAT", default=str(DEFAULT_SITE_LATITUDE)),
+            longitude=_env_float("ENERGY_SITE_LON", default=str(DEFAULT_SITE_LONGITUDE)),
+        )
+        return cls(sites=(site,), default_id=site.id)
+
+    @property
+    def mapping(self) -> dict[str, Site]:
+        """Site id -> :class:`Site`, for the connectors' coordinate lookup."""
+        return {site.id: site for site in self.sites}
+
+    @property
+    def default(self) -> Site:
+        return self.resolve(self.default_id)
+
+    def resolve(self, site_id: str) -> Site:
+        for site in self.sites:
+            if site.id == site_id:
+                return site
+        known = ", ".join(site.id for site in self.sites)
+        raise KeyError(f"unknown site '{site_id}'; configured sites: {known}")
+
+
+@dataclass(frozen=True, slots=True)
+class OpenMeteoConfig:
+    """Settings for the Open-Meteo archive and forecast HTTP clients."""
+
+    archive_url: str = DEFAULT_OPEN_METEO_ARCHIVE_URL
+    forecast_url: str = DEFAULT_OPEN_METEO_FORECAST_URL
+    timeout_seconds: float = 30.0
+    max_retries: int = 3
+    forecast_days: int = DEFAULT_FORECAST_DAYS
+
+    @classmethod
+    def from_env(cls) -> OpenMeteoConfig:
+        return cls(
+            archive_url=_env(
+                "ENERGY_OPEN_METEO_ARCHIVE_URL", default=DEFAULT_OPEN_METEO_ARCHIVE_URL
+            ),
+            forecast_url=_env(
+                "ENERGY_OPEN_METEO_FORECAST_URL", default=DEFAULT_OPEN_METEO_FORECAST_URL
+            ),
+            timeout_seconds=_env_float("ENERGY_OPEN_METEO_TIMEOUT", default="30"),
+            max_retries=_env_int("ENERGY_OPEN_METEO_MAX_RETRIES", default="3"),
+            forecast_days=_env_int("ENERGY_FORECAST_DAYS", default=str(DEFAULT_FORECAST_DAYS)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class AppConfig:
     """Top-level configuration bundle."""
 
     postgres: PostgresConfig
     smard: SmardConfig
+    open_meteo: OpenMeteoConfig
+    site: SiteConfig
 
     @classmethod
     def from_env(cls) -> AppConfig:
-        return cls(postgres=PostgresConfig.from_env(), smard=SmardConfig.from_env())
+        return cls(
+            postgres=PostgresConfig.from_env(),
+            smard=SmardConfig.from_env(),
+            open_meteo=OpenMeteoConfig.from_env(),
+            site=SiteConfig.from_env(),
+        )

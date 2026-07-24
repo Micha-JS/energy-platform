@@ -17,10 +17,25 @@ Point = tuple[int, float | None]
 
 
 class Dataset(StrEnum):
-    """A market-data series we ingest."""
+    """A time-series we ingest.
 
+    Market-data series (SMARD) and weather variables (Open-Meteo) share this enum: the
+    ingestion core and raw zone are source-agnostic and treat ``dataset`` as an opaque
+    string, so each weather variable is simply its own single-valued series -- no change to
+    :class:`Point`, the content hash, or the ``observations`` table.
+    """
+
+    # -- Market data (SMARD) --
     DAY_AHEAD_PRICE = "day_ahead_price"
     GRID_LOAD = "grid_load"
+
+    # -- Weather (Open-Meteo), hourly, values in UTC --
+    SHORTWAVE_RADIATION = "shortwave_radiation"  # GHI, W/m^2
+    DIRECT_RADIATION = "direct_radiation"  # W/m^2
+    DIFFUSE_RADIATION = "diffuse_radiation"  # W/m^2
+    TEMPERATURE_2M = "temperature_2m"  # deg C
+    CLOUD_COVER = "cloud_cover"  # %
+    WIND_SPEED_10M = "wind_speed_10m"  # m/s
 
 
 class Resolution(StrEnum):
@@ -93,3 +108,29 @@ class RawSeries:
     @property
     def null_count(self) -> int:
         return sum(1 for _, value in self.points if value is None)
+
+
+@dataclass(frozen=True, slots=True)
+class RawForecast:
+    """A single forecast vintage: every variable's full horizon, as received in one snapshot.
+
+    Unlike :class:`RawSeries` -- one windowed variable of settled truth -- a forecast is pulled
+    as a multi-variable horizon and stored as one immutable vintage keyed by its issue instant.
+    ``series`` maps each variable to its points; timestamps are UTC instants spanning the
+    horizon, and ``None`` values are preserved verbatim, never fabricated or interpolated.
+    """
+
+    source: str
+    region: str  # site id
+    resolution: Resolution
+    source_tz: str
+    source_urls: tuple[str, ...]
+    series: dict[Dataset, tuple[Point, ...]]
+
+    @property
+    def row_count(self) -> int:
+        return sum(len(points) for points in self.series.values())
+
+    @property
+    def null_count(self) -> int:
+        return sum(1 for points in self.series.values() for _, value in points if value is None)

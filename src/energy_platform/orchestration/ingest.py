@@ -10,13 +10,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from energy_platform.connectors.base import MarketDataConnector
+from energy_platform.connectors.open_meteo import WEATHER_VARIABLES, OpenMeteoForecastClient
 from energy_platform.connectors.types import Dataset, Point, Resolution, UtcWindow
 from energy_platform.orchestration.raw_zone import (
+    ForecastIngestionRecord,
     IngestionRecord,
     RawZoneRepository,
     WriteOutcome,
@@ -131,4 +134,107 @@ def ingest_partition(
         null_count=record.null_count,
         expected_count=record.expected_count,
         hours_in_day=record.hours_in_day,
+    )
+
+
+# -- Forecast vintages -----------------------------------------------------------------
+
+
+def forecast_content_hash(
+    source: str,
+    region: str,
+    resolution: Resolution,
+    issue_date: date,
+    series: Mapping[Dataset, tuple[Point, ...]],
+) -> str:
+    """Deterministic sha256 over a forecast vintage's identity and its values.
+
+    Variables are sorted so ordering never affects the digest, and ``issue_time`` is
+    deliberately excluded: an identical forecast re-fetched moments later hashes the same, so
+    it is a verifiable no-op rather than a spurious new vintage. A single changed value, or a
+    ``None`` where a number was, changes the digest.
+    """
+    canonical = json.dumps(
+        {
+            "source": source,
+            "region": region,
+            "resolution": resolution.value,
+            "issue_date": issue_date.isoformat(),
+            "series": {
+                variable.value: [[ts, value] for ts, value in series[variable]]
+                for variable in sorted(series, key=lambda d: d.value)
+            },
+        },
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class ForecastIngestResult:
+    """Outcome of ingesting a single forecast vintage, for asset metadata / CLI summaries."""
+
+    issue_date: date
+    outcome: WriteOutcome
+    content_hash: str
+    row_count: int
+    null_count: int
+    variable_count: int
+    horizon_days: int
+
+    @property
+    def is_noop(self) -> bool:
+        return self.outcome is WriteOutcome.NOOP
+
+    @property
+    def has_missing(self) -> bool:
+        """True if any forecast value is null -- surfaced, never fabricated."""
+        return self.null_count > 0
+
+
+def ingest_forecast_vintage(
+    client: OpenMeteoForecastClient,
+    repo: RawZoneRepository,
+    site_id: str,
+    resolution: Resolution,
+    issue_day: date,
+    issue_time: datetime,
+    *,
+    variables: Sequence[Dataset] = WEATHER_VARIABLES,
+    dagster_run_id: str | None = None,
+) -> ForecastIngestResult:
+    """Fetch the current forecast horizon and persist it as one immutable vintage.
+
+    ``issue_time`` is the caller-supplied as-of instant (``datetime.now(UTC)`` in production, a
+    fixed instant in tests), stored so backtests can reconstruct exactly what was known when.
+    """
+    forecast = client.fetch_forecast(site_id, resolution, variables)
+    digest = forecast_content_hash(forecast.source, site_id, resolution, issue_day, forecast.series)
+    payload = {variable.value: list(points) for variable, points in forecast.series.items()}
+
+    record = ForecastIngestionRecord(
+        source=forecast.source,
+        region=site_id,
+        resolution=resolution.value,
+        issue_date=issue_day,
+        issue_time=issue_time,
+        horizon_days=client.forecast_days,
+        source_urls=list(forecast.source_urls),
+        payload=payload,
+        content_hash=digest,
+        row_count=forecast.row_count,
+        null_count=forecast.null_count,
+        dagster_run_id=dagster_run_id,
+    )
+    outcome = repo.write_forecast_ingestion(record)
+
+    return ForecastIngestResult(
+        issue_date=issue_day,
+        outcome=outcome,
+        content_hash=digest,
+        row_count=record.row_count,
+        null_count=record.null_count,
+        variable_count=len(forecast.series),
+        horizon_days=record.horizon_days,
     )
