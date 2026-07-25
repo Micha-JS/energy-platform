@@ -44,6 +44,28 @@ backfill *ARGS:
 seed *ARGS:
     uv run energy-platform backfill --datasets price,load,weather,telemetry {{ARGS}}
 
+# Install the dbt package dependencies (dbt_utils) into dbt/dbt_packages. dbt runs from its own
+# isolated uv project (dbt/pyproject.toml) -- its pins conflict with the app's, see dbt/README.
+dbt-deps:
+    uv run --project dbt dbt deps --project-dir dbt --profiles-dir dbt
+
+# Seed the raw zone offline (recorded fixtures, no network) for the two DST windows the dbt
+# layer and its tests are built on, then capture two deterministic forecast vintages. Uses the
+# app CLI (root env), not the dbt env.
+dbt-seed:
+    uv run energy-platform backfill --offline --from 2024-03-28 --to 2024-04-03 --datasets price,load,weather,telemetry
+    uv run energy-platform backfill --offline --from 2024-10-24 --to 2024-10-30 --datasets price,load,weather,telemetry
+    uv run energy-platform forecast-snapshot --offline --issue-date 2024-03-28
+    uv run energy-platform forecast-snapshot --offline --issue-date 2024-03-29
+
+# Build all dbt models and run every test (generic, singular DST, freshness-free).
+dbt-build:
+    uv run --project dbt dbt build --project-dir dbt --profiles-dir dbt
+
+# Generate the dbt docs site into dbt/target (index.html + manifest + catalog).
+dbt-docs:
+    uv run --project dbt dbt docs generate --project-dir dbt --profiles-dir dbt
+
 # Boot the empty Dagster + Postgres stack -> http://localhost:3000
 demo:
     docker compose up --build

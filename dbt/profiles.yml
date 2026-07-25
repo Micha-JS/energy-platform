@@ -1,0 +1,17 @@
+# Connects dbt to the same Postgres the ingestion pipeline writes, reading the raw zone as a
+# source and materialising models into the `analytics*` schemas. Env vars mirror
+# energy_platform.config.PostgresConfig defaults, so a freshly cloned repo needs no config.
+# Invoke with `--profiles-dir dbt`.
+energy_platform:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('ENERGY_PG_HOST', 'localhost') }}"
+      port: "{{ env_var('ENERGY_PG_PORT', '5432') | int }}"
+      user: "{{ env_var('ENERGY_PG_USER', 'dagster') }}"
+      password: "{{ env_var('ENERGY_PG_PASSWORD', 'dagster') }}"
+      dbname: "{{ env_var('ENERGY_PG_DB', 'dagster') }}"
+      schema: analytics
+      threads: 4
+      sslmode: prefer

@@ -1,9 +1,11 @@
 """Record real SMARD responses as test fixtures (dev-only; not run in CI).
 
-Fetches the live SMARD index and the weekly files covering a handful of representative
-days -- including both 2024 DST-transition Sundays -- and writes them verbatim under
-``tests/connectors/fixtures/``. The stored index is trimmed to only the weeks fetched so
-the offline ``MockTransport`` in the test suite is self-consistent.
+Fetches the live SMARD index and the weekly files covering the days the offline test suite and
+the M4 CI backfill exercise -- a normal day plus the two ~week-long windows straddling the 2024
+DST-transition Sundays -- and writes them verbatim under ``tests/connectors/fixtures/``. Because
+SMARD serves whole weeks, covering a window's endpoints pulls every day in between for free. The
+stored index is trimmed to only the weeks fetched so the offline ``MockTransport`` is
+self-consistent. Provenance is tracked in ``tests/connectors/fixtures/MANIFEST.md``.
 
 Run with: ``uv run python scripts/record_smard_fixtures.py``
 """
@@ -11,7 +13,7 @@ Run with: ``uv run python scripts/record_smard_fixtures.py``
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import httpx
@@ -24,10 +26,30 @@ BASE_URL = "https://www.smard.de/app/chart_data"
 REGION = "DE"
 FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "connectors" / "fixtures"
 
-# (filter_id, resolution, representative days to cover)
+# The two M4 CI windows (inclusive Berlin days) plus a normal reference day. Endpoints suffice for
+# SMARD's weekly files; both DST Sundays fall inside their window.
+NORMAL_DAY = date(2024, 6, 12)
+MARCH_WINDOW = (date(2024, 3, 28), date(2024, 4, 3))
+OCTOBER_WINDOW = (date(2024, 10, 24), date(2024, 10, 30))
+
+
+def _days(*spans: tuple[date, date]) -> list[date]:
+    out: list[date] = []
+    for start, end in spans:
+        day = start
+        while day <= end:
+            out.append(day)
+            day += timedelta(days=1)
+    return out
+
+
+_WINDOW_DAYS = [NORMAL_DAY, *_days(MARCH_WINDOW, OCTOBER_WINDOW)]
+
+# (filter_id, resolution, representative days to cover). Hourly spans both full windows; the
+# quarter-hour series only needs the DST Sundays the unit tests assert on.
 SPECS: list[tuple[str, Resolution, list[date]]] = [
-    ("4169", Resolution.HOUR, [date(2024, 6, 12), date(2024, 3, 31), date(2024, 10, 27)]),
-    ("410", Resolution.HOUR, [date(2024, 6, 12), date(2024, 3, 31), date(2024, 10, 27)]),
+    ("4169", Resolution.HOUR, _WINDOW_DAYS),
+    ("410", Resolution.HOUR, _WINDOW_DAYS),
     ("4169", Resolution.QUARTERHOUR, [date(2024, 3, 31), date(2024, 10, 27)]),
 ]
 
@@ -59,8 +81,13 @@ def main() -> None:
             weeks = sorted(_weeks_for_days(client, filter_id, resolution, days))
 
             for week_ts in weeks:
-                raw = http.get(_week_url(filter_id, resolution, week_ts)).content
                 out = FIXTURES / f"{filter_id}_{REGION}_{resolution.value}_{week_ts}.json"
+                # Additive: never clobber an already-recorded fixture (some carry a hand-injected
+                # gap for the "NaN over fabrication" tests). Delete a file to force a refresh.
+                if out.exists():
+                    print(f"skip  {out.name} (exists)")
+                    continue
+                raw = http.get(_week_url(filter_id, resolution, week_ts)).content
                 out.write_bytes(raw)
                 print(f"wrote {out.name} ({len(raw)} bytes)")
 

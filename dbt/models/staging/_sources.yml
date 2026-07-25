@@ -1,0 +1,29 @@
+version: 2
+
+sources:
+  - name: raw
+    description: >
+      The append-only ingestion raw zone written by `energy-platform backfill` /
+      `forecast-snapshot`. Read-only here: staging models never mutate it.
+    schema: "{{ env_var('ENERGY_RAW_SCHEMA', 'raw') }}"
+    tables:
+      - name: observations_current
+        description: >
+          Latest-ingestion observations per partition (a SMARD revision appends a new version;
+          readers see one clean series). Columns: dataset, region, resolution, ts_utc, value,
+          is_missing. Note: the view omits `source`; join `ingestion` on ingestion_id for it.
+      - name: observations
+        description: Faithful long-form unnest of every ingestion (all versions, not just latest).
+      - name: ingestion
+        description: One row per successful partition ingestion; carries `source` and `fetched_at`.
+        loaded_at_field: fetched_at
+        freshness:
+          warn_after: {count: 26, period: hour}
+          error_after: {count: 50, period: hour}
+      - name: forecast_observations
+        description: >
+          Weather forecast vintages, keyed by (issue_time, target_ts_utc). Never collapsed to
+          "latest" -- each vintage is an independent truth. ONLY stg_weather_forecast may read
+          this (enforced by tests/dbt/test_no_lookahead.py).
+      - name: forecast_ingestion
+        description: One row per forecast vintage; carries issue_date, issue_time, fetched_at.

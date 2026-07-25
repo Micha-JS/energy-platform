@@ -9,6 +9,8 @@ fails here.
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 from dagster import EnvVar
 
@@ -37,11 +39,15 @@ def test_token_value_absent_from_serialized_config(monkeypatch: pytest.MonkeyPat
 
 def test_token_resolves_from_env_at_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ENERGY_HA_TOKEN", _SENTINEL)
-    initialized = _resource().process_config_and_initialize()
+    # process_config_and_initialize() returns the resolved resource; ConfigurableResource's
+    # generic param types it as the yielded client, so narrow it back for the token assertion.
+    initialized = cast(HomeAssistantResource, _resource().process_config_and_initialize())
     assert initialized.token == _SENTINEL
 
 
 def test_definitions_wire_the_token_as_an_env_var() -> None:
     # Call-site guard: the code location must configure the token as an EnvVar, so nothing resolves
     # (and could be serialized) at definition time.
-    assert isinstance(definitions.defs.resources["home_assistant"].token, EnvVar)
+    resources = definitions.defs.resources
+    assert resources is not None
+    assert isinstance(resources["home_assistant"].token, EnvVar)
