@@ -33,10 +33,16 @@ test:
 # Full local gate — mirrors CI.
 check: lint typecheck test
 
-# Load SMARD market-data history into the raw zone (idempotent, resumable).
-# Example: just backfill --from 2024-01-01
+# Load history into the raw zone (idempotent, resumable). --datasets selects sources.
+# Example: just backfill --from 2024-01-01 --datasets price,load
 backfill *ARGS:
     uv run energy-platform backfill {{ARGS}}
+
+# Seed the full demo: prices, weather, and synthetic telemetry in dependency order
+# (weather before telemetry). Re-running is a content-hash no-op.
+# Example: just seed --from 2024-01-01 --to 2024-01-07
+seed *ARGS:
+    uv run energy-platform backfill --datasets price,load,weather,telemetry {{ARGS}}
 
 # Boot the empty Dagster + Postgres stack -> http://localhost:3000
 demo:

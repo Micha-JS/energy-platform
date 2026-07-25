@@ -20,20 +20,24 @@ from dagster import (
 )
 
 from energy_platform.connectors.open_meteo import WEATHER_VARIABLES
+from energy_platform.connectors.synthetic import TELEMETRY_DATASETS
 from energy_platform.connectors.types import Dataset, Resolution
 from energy_platform.orchestration.ingest import ingest_forecast_vintage, ingest_partition
 from energy_platform.orchestration.partitions import (
     PARTITION_TIMEZONE,
     daily_de_partitions,
     daily_forecast_partitions,
+    daily_telemetry_partitions,
     daily_weather_partitions,
     partition_key_to_date,
 )
 from energy_platform.orchestration.resources import (
+    HomeAssistantResource,
     OpenMeteoArchiveClientResource,
     OpenMeteoForecastClientResource,
     RawZonePostgresResource,
     SmardClientResource,
+    SyntheticTelemetryResource,
 )
 
 REGION = "DE"
@@ -253,3 +257,121 @@ def open_meteo_weather_forecast_raw(
 
 
 weather_assets = [open_meteo_weather_actuals_raw, open_meteo_weather_forecast_raw]
+
+
+# -- Household telemetry (synthetic demo + real Fenecon) -------------------------------
+
+
+def _telemetry_result(
+    context: AssetExecutionContext,
+    outcomes: "Counter[str]",
+    row_total: int,
+    null_total: int,
+    site_id: str,
+    label: str,
+) -> MaterializeResult:
+    n = len(TELEMETRY_DATASETS)
+    context.log.info(
+        "%s @ %s: %d series (%s), %d rows, %d null",
+        label,
+        site_id,
+        n,
+        dict(outcomes),
+        row_total,
+        null_total,
+    )
+    return MaterializeResult(
+        metadata={
+            "site": site_id,
+            "series_count": n,
+            "loaded": outcomes.get("loaded", 0),
+            "noop": outcomes.get("noop", 0),
+            "revision": outcomes.get("revision", 0),
+            "row_count": row_total,
+            "null_count": null_total,
+            "all_noop": row_total > 0 and outcomes.get("noop", 0) == n,
+        }
+    )
+
+
+@asset(
+    name="synthetic_telemetry_raw",
+    description=(
+        "Synthetic household telemetry (PV, load, battery charge/discharge, SoC, grid "
+        "import/export) for the site, hourly, one Europe/Berlin day per partition. A pure "
+        "function of (config, date) and the day's ingested irradiance -- so demo mode is "
+        "indistinguishable in shape from real telemetry and re-ingestion is a content-hash "
+        "no-op. Depends on weather actuals: PV derives from that day's irradiance."
+    ),
+    partitions_def=daily_telemetry_partitions,
+    deps=[open_meteo_weather_actuals_raw],
+    group_name="telemetry",
+    kinds={"python", "postgres"},
+)
+def synthetic_telemetry_raw(
+    context: AssetExecutionContext,
+    synthetic_telemetry: SyntheticTelemetryResource,
+    raw_zone: RawZonePostgresResource,
+) -> MaterializeResult:
+    day = partition_key_to_date(context.partition_key)
+    site_id = synthetic_telemetry.default_site_id
+
+    outcomes: Counter[str] = Counter()
+    row_total = 0
+    null_total = 0
+    # One repository serves as both the irradiance reader (the client pulls the day's weather
+    # through it) and the write target, so the coupled simulation runs once and all seven series
+    # persist over a single connection.
+    with raw_zone.get_repository() as repo:
+        client = synthetic_telemetry.build(repo)
+        for dataset in TELEMETRY_DATASETS:
+            result = ingest_partition(
+                client, repo, dataset, site_id, RESOLUTION, day, dagster_run_id=context.run_id
+            )
+            outcomes[result.outcome.value] += 1
+            row_total += result.row_count
+            null_total += result.null_count
+
+    return _telemetry_result(
+        context, outcomes, row_total, null_total, site_id, "synthetic telemetry"
+    )
+
+
+@asset(
+    name="fenecon_telemetry_raw",
+    description=(
+        "Real Fenecon Home 10 telemetry via the read-only Home Assistant connector, hourly, one "
+        "Europe/Berlin day per partition. Disabled by default and never scheduled: it runs only "
+        "where ENERGY_HA_* credentials are present (verified manually over Tailscale). Lands in "
+        "the identical schema as synthetic telemetry, differing only in source ('fenecon')."
+    ),
+    partitions_def=daily_telemetry_partitions,
+    group_name="telemetry",
+    kinds={"python", "postgres"},
+)
+def fenecon_telemetry_raw(
+    context: AssetExecutionContext,
+    home_assistant: HomeAssistantResource,
+    raw_zone: RawZonePostgresResource,
+) -> MaterializeResult:
+    day = partition_key_to_date(context.partition_key)
+    site_id = home_assistant.default_site_id
+
+    outcomes: Counter[str] = Counter()
+    row_total = 0
+    null_total = 0
+    with raw_zone.get_repository() as repo, home_assistant.get_client() as client:
+        for dataset in TELEMETRY_DATASETS:
+            result = ingest_partition(
+                client, repo, dataset, site_id, RESOLUTION, day, dagster_run_id=context.run_id
+            )
+            outcomes[result.outcome.value] += 1
+            row_total += result.row_count
+            null_total += result.null_count
+
+    return _telemetry_result(context, outcomes, row_total, null_total, site_id, "fenecon telemetry")
+
+
+# The synthetic asset is the demo/CI path and is scheduled; the real Fenecon asset is defined so
+# a credentialed deployment can materialise it, but stays out of the default schedules.
+telemetry_assets = [synthetic_telemetry_raw, fenecon_telemetry_raw]

@@ -1,0 +1,9 @@
+[
+  [
+    {"entity_id": "sensor.pv_power", "state": "0", "last_changed": "2024-06-15T00:00:00+00:00"},
+    {"state": "1500", "last_changed": "2024-06-15T09:00:00+00:00"},
+    {"state": "3000", "last_changed": "2024-06-15T12:00:00+00:00"},
+    {"state": "1000", "last_changed": "2024-06-15T15:00:00+00:00"},
+    {"state": "0", "last_changed": "2024-06-15T20:00:00+00:00"}
+  ]
+]

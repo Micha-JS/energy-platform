@@ -4,7 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from energy_platform.config import OpenMeteoConfig, PostgresConfig, SiteConfig, SmardConfig
+from energy_platform.config import (
+    BatteryConfig,
+    HomeAssistantConfig,
+    OpenMeteoConfig,
+    PostgresConfig,
+    PvSystemConfig,
+    SiteConfig,
+    SmardConfig,
+)
 
 
 def test_defaults_need_no_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -51,3 +59,42 @@ def test_malformed_float_raises_a_named_error(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("ENERGY_SMARD_TIMEOUT", "soon")
     with pytest.raises(ValueError, match="ENERGY_SMARD_TIMEOUT"):
         SmardConfig.from_env()
+
+
+def test_system_defaults_match_the_fenecon(monkeypatch: pytest.MonkeyPatch) -> None:
+    for var in ("ENERGY_PV_DC_KWP", "ENERGY_BATTERY_CAPACITY_KWH", "ENERGY_BATTERY_RTE"):
+        monkeypatch.delenv(var, raising=False)
+    assert PvSystemConfig.from_env().dc_kwp == 8.8
+    battery = BatteryConfig.from_env()
+    assert battery.capacity_kwh == 14.0
+    assert 0.0 < battery.round_trip_efficiency <= 1.0
+    # AC cap is a distinct inverter property, not the DC nameplate.
+    assert PvSystemConfig.from_env().ac_cap_kw != PvSystemConfig.from_env().dc_kwp
+
+
+def test_home_assistant_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    for var in ("ENERGY_HA_ENABLED", "ENERGY_HA_URL", "ENERGY_HA_TOKEN", "ENERGY_HA_ENTITY_MAP"):
+        monkeypatch.delenv(var, raising=False)
+    config = HomeAssistantConfig.from_env()
+    assert config.enabled is False
+    assert config.entities == {}
+
+
+def test_home_assistant_entity_map_parses(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENERGY_HA_ENABLED", "yes")
+    monkeypatch.setenv("ENERGY_HA_ENTITY_MAP", "pv_production=sensor.pv, soc=sensor.soc")
+    config = HomeAssistantConfig.from_env()
+    assert config.enabled is True
+    assert config.entities == {"pv_production": "sensor.pv", "soc": "sensor.soc"}
+
+
+def test_home_assistant_malformed_entity_map_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENERGY_HA_ENTITY_MAP", "pv_production")  # no '=entity'
+    with pytest.raises(ValueError, match="ENERGY_HA_ENTITY_MAP"):
+        HomeAssistantConfig.from_env()
+
+
+def test_bool_env_rejects_garbage(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENERGY_HA_ENABLED", "maybe")
+    with pytest.raises(ValueError, match="ENERGY_HA_ENABLED"):
+        HomeAssistantConfig.from_env()

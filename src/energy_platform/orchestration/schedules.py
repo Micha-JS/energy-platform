@@ -17,6 +17,7 @@ from energy_platform.orchestration.assets import (
     market_data_assets,
     open_meteo_weather_actuals_raw,
     open_meteo_weather_forecast_raw,
+    synthetic_telemetry_raw,
 )
 from energy_platform.orchestration.partition_config import PARTITION_TIMEZONE
 
@@ -85,3 +86,30 @@ def daily_weather_forecast_schedule(context: ScheduleEvaluationContext) -> RunRe
     """
     issue_day = context.scheduled_execution_time.date()
     return RunRequest(partition_key=issue_day.isoformat())
+
+
+# -- Telemetry: synthetic, derived from weather, so it trails the weather lag ----------
+
+telemetry_job = define_asset_job(
+    name="telemetry_job",
+    selection=[synthetic_telemetry_raw],
+)
+
+
+@schedule(
+    job=telemetry_job,
+    # An hour after the weather-actuals schedule (06:30) so the same target day's irradiance has
+    # landed before telemetry derives PV from it.
+    cron_schedule="30 7 * * *",
+    execution_timezone=PARTITION_TIMEZONE,
+    default_status=DefaultScheduleStatus.RUNNING,
+)
+def daily_telemetry_schedule(context: ScheduleEvaluationContext) -> RunRequest:
+    """Materialise synthetic telemetry for the same settled day the weather schedule targets.
+
+    Telemetry derives PV from ingested irradiance, so it must trail the ERA5 archive lag by the
+    same margin as weather actuals -- otherwise it would generate from irradiance that has not
+    settled yet. Only the synthetic asset is scheduled; the real Fenecon asset is manual.
+    """
+    target_day = context.scheduled_execution_time.date() - timedelta(days=ARCHIVE_LAG_DAYS)
+    return RunRequest(partition_key=target_day.isoformat())

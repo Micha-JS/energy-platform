@@ -19,6 +19,7 @@ __all__ = [
     "PARTITION_TIMEZONE",
     "daily_de_partitions",
     "daily_forecast_partitions",
+    "daily_telemetry_partitions",
     "daily_weather_partitions",
     "partition_key_to_date",
 ]
@@ -31,6 +32,15 @@ daily_de_partitions = DailyPartitionsDefinition(
 
 # Weather actuals: same Berlin-day calendar and range as the market data they sit alongside.
 daily_weather_partitions = DailyPartitionsDefinition(
+    start_date=PARTITION_START,
+    timezone=PARTITION_TIMEZONE,
+    fmt="%Y-%m-%d",
+)
+
+# Household telemetry: the same Berlin-day calendar as weather. Telemetry derives PV from a
+# day's ingested irradiance, so its partitions map 1:1 onto the weather partitions (identity
+# mapping), and the asset declares that dependency via ``deps``.
+daily_telemetry_partitions = DailyPartitionsDefinition(
     start_date=PARTITION_START,
     timezone=PARTITION_TIMEZONE,
     fmt="%Y-%m-%d",

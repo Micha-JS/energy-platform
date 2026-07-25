@@ -30,6 +30,16 @@ DEFAULT_SITE_ID = "home"
 DEFAULT_SITE_LATITUDE = 52.52
 DEFAULT_SITE_LONGITUDE = 13.40
 
+# Fenecon Home 10 system, published as ordinary config (only the *values* of real telemetry
+# are private -- the system's nameplate parameters are not). These same PV and battery numbers
+# parameterise both the M3 synthetic generator and, later, the M6 dispatch optimiser, so the
+# "actual" and "optimal" sides of the savings comparison run on identical physics.
+DEFAULT_PV_DC_KWP = 8.8
+DEFAULT_PV_AC_CAP_KW = 8.0
+DEFAULT_PV_PERFORMANCE_RATIO = 0.82
+DEFAULT_PV_TEMP_COEFF_PER_C = -0.004
+DEFAULT_BATTERY_CAPACITY_KWH = 14.0
+
 
 def _env(*names: str, default: str) -> str:
     """Return the first *set* environment variable among ``names``, else ``default``.
@@ -61,6 +71,37 @@ def _env_float(*names: str, default: str) -> float:
         return float(raw)
     except ValueError as exc:
         raise ValueError(f"expected a number for {' / '.join(names)}, got {raw!r}") from exc
+
+
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+_FALSY = frozenset({"0", "false", "no", "off", ""})
+
+
+def _env_bool(*names: str, default: str) -> bool:
+    """Like :func:`_env`, but parsed as a boolean from a small set of accepted spellings."""
+    raw = _env(*names, default=default).strip().lower()
+    if raw in _TRUTHY:
+        return True
+    if raw in _FALSY:
+        return False
+    raise ValueError(f"expected a boolean for {' / '.join(names)}, got {raw!r}")
+
+
+def _parse_entity_map(raw: str) -> tuple[tuple[str, str], ...]:
+    """Parse ``dataset=entity,dataset=entity`` into a hashable tuple of pairs.
+
+    Kept as a tuple (not a dict) so the enclosing config dataclass stays frozen and hashable.
+    Empty input yields an empty mapping (the disabled-by-default case).
+    """
+    pairs: list[tuple[str, str]] = []
+    for token in (part.strip() for part in raw.split(",")):
+        if not token:
+            continue
+        key, sep, value = token.partition("=")
+        if not sep or not key.strip() or not value.strip():
+            raise ValueError(f"malformed ENERGY_HA_ENTITY_MAP entry {token!r}; want dataset=entity")
+        pairs.append((key.strip(), value.strip()))
+    return tuple(pairs)
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +235,122 @@ class OpenMeteoConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class PvSystemConfig:
+    """The PV array + inverter, as used by the synthetic generator (and later M6).
+
+    ``dc_kwp`` is the panel nameplate; ``ac_cap_kw`` is the *inverter's* AC ceiling -- a
+    distinct property, deliberately kept separate so the model can clip production the way a
+    real inverter does rather than pretending the DC rating is deliverable. ``performance_ratio``
+    (~0.80-0.85 conventionally) folds soiling, wiring, and inverter losses into one factor;
+    ``temp_coeff_per_c`` (~-0.004 /degC for silicon) is the linear power derate away from the
+    25 degC reference cell temperature.
+    """
+
+    dc_kwp: float = DEFAULT_PV_DC_KWP
+    ac_cap_kw: float = DEFAULT_PV_AC_CAP_KW
+    performance_ratio: float = DEFAULT_PV_PERFORMANCE_RATIO
+    temp_coeff_per_c: float = DEFAULT_PV_TEMP_COEFF_PER_C
+
+    @classmethod
+    def from_env(cls) -> PvSystemConfig:
+        return cls(
+            dc_kwp=_env_float("ENERGY_PV_DC_KWP", default=str(DEFAULT_PV_DC_KWP)),
+            ac_cap_kw=_env_float("ENERGY_PV_AC_CAP_KW", default=str(DEFAULT_PV_AC_CAP_KW)),
+            performance_ratio=_env_float(
+                "ENERGY_PV_PERFORMANCE_RATIO", default=str(DEFAULT_PV_PERFORMANCE_RATIO)
+            ),
+            temp_coeff_per_c=_env_float(
+                "ENERGY_PV_TEMP_COEFF_PER_C", default=str(DEFAULT_PV_TEMP_COEFF_PER_C)
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class BatteryConfig:
+    """The battery, as simulated under naive self-consumption in M3 and optimised in M6.
+
+    This is the single physics config shared across the "actual behaviour" baseline and the
+    optimiser, so the headline savings number is a like-for-like comparison, not an artefact of
+    two different battery models. ``soc_min``/``soc_max`` are the usable fraction of
+    ``capacity_kwh``; ``round_trip_efficiency`` is split symmetrically into a charge and a
+    discharge leg (each ``sqrt(rte)``) in the simulation.
+    """
+
+    capacity_kwh: float = DEFAULT_BATTERY_CAPACITY_KWH
+    soc_min: float = 0.05
+    soc_max: float = 1.0
+    max_charge_kw: float = 5.0
+    max_discharge_kw: float = 5.0
+    round_trip_efficiency: float = 0.90
+
+    @classmethod
+    def from_env(cls) -> BatteryConfig:
+        return cls(
+            capacity_kwh=_env_float(
+                "ENERGY_BATTERY_CAPACITY_KWH", default=str(DEFAULT_BATTERY_CAPACITY_KWH)
+            ),
+            soc_min=_env_float("ENERGY_BATTERY_SOC_MIN", default="0.05"),
+            soc_max=_env_float("ENERGY_BATTERY_SOC_MAX", default="1.0"),
+            max_charge_kw=_env_float("ENERGY_BATTERY_MAX_CHARGE_KW", default="5.0"),
+            max_discharge_kw=_env_float("ENERGY_BATTERY_MAX_DISCHARGE_KW", default="5.0"),
+            round_trip_efficiency=_env_float("ENERGY_BATTERY_RTE", default="0.90"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SyntheticConfig:
+    """Parameters of the synthetic telemetry generator.
+
+    ``salt`` seeds the per-day RNG (see the generator docstring): it is part of the data
+    contract, because changing it changes every emitted value and therefore every content hash.
+    ``annual_load_kwh`` scales the deterministic household load profile.
+    """
+
+    salt: str = "energy-platform-synthetic-v1"
+    annual_load_kwh: float = 4000.0
+
+    @classmethod
+    def from_env(cls) -> SyntheticConfig:
+        return cls(
+            salt=_env("ENERGY_SYNTHETIC_SALT", default="energy-platform-synthetic-v1"),
+            annual_load_kwh=_env_float("ENERGY_SYNTHETIC_ANNUAL_LOAD_KWH", default="4000"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class HomeAssistantConfig:
+    """The real-telemetry connector's settings -- disabled by default.
+
+    Credentials and host come *only* from the environment and are never committed. The
+    connector refuses to run unless ``enabled`` is set and a base URL and token are present, so
+    the public repo and CI can never accidentally reach a live house. ``entity_map`` maps each
+    telemetry :class:`~energy_platform.connectors.types.Dataset` value to a Home Assistant
+    entity id, parsed from ``ENERGY_HA_ENTITY_MAP`` as ``dataset=entity,dataset=entity,...``.
+    """
+
+    enabled: bool = False
+    base_url: str = ""
+    token: str = ""
+    verify_tls: bool = True
+    entity_map: tuple[tuple[str, str], ...] = ()
+
+    @classmethod
+    def from_env(cls) -> HomeAssistantConfig:
+        return cls(
+            enabled=_env_bool("ENERGY_HA_ENABLED", default="0"),
+            base_url=_env("ENERGY_HA_URL", default=""),
+            token=_env("ENERGY_HA_TOKEN", default=""),
+            verify_tls=_env_bool("ENERGY_HA_VERIFY_TLS", default="1"),
+            entity_map=_parse_entity_map(_env("ENERGY_HA_ENTITY_MAP", default="")),
+        )
+
+    @property
+    def entities(self) -> dict[str, str]:
+        """Dataset value -> entity id (materialised from the hashable tuple form)."""
+        return dict(self.entity_map)
+
+
+@dataclass(frozen=True, slots=True)
 class AppConfig:
     """Top-level configuration bundle."""
 
@@ -201,6 +358,10 @@ class AppConfig:
     smard: SmardConfig
     open_meteo: OpenMeteoConfig
     site: SiteConfig
+    pv: PvSystemConfig
+    battery: BatteryConfig
+    synthetic: SyntheticConfig
+    home_assistant: HomeAssistantConfig
 
     @classmethod
     def from_env(cls) -> AppConfig:
@@ -209,4 +370,8 @@ class AppConfig:
             smard=SmardConfig.from_env(),
             open_meteo=OpenMeteoConfig.from_env(),
             site=SiteConfig.from_env(),
+            pv=PvSystemConfig.from_env(),
+            battery=BatteryConfig.from_env(),
+            synthetic=SyntheticConfig.from_env(),
+            home_assistant=HomeAssistantConfig.from_env(),
         )

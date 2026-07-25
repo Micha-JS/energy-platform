@@ -264,6 +264,43 @@ class RawZoneRepository:
             row = cur.fetchone()
         return None if row is None else str(row[0])
 
+    def read_current_series(
+        self,
+        source: str,
+        dataset: str,
+        region: str,
+        resolution: str,
+        start_ms: int,
+        end_ms: int,
+    ) -> tuple[Point, ...]:
+        """Latest-ingestion observations for one series within ``[start_ms, end_ms)``, UTC ms.
+
+        Reads through ``observations_current`` (so a revised partition returns its newest
+        version) joined back to ``ingestion`` for the ``source`` column the view omits. Used by
+        the synthetic telemetry generator to pull already-ingested irradiance/temperature;
+        rows are returned ordered, with ``None`` values preserved verbatim -- missing intervals
+        simply do not appear, so the caller sees exactly what was ingested.
+        """
+        start = _EPOCH + timedelta(milliseconds=start_ms)
+        end = _EPOCH + timedelta(milliseconds=end_ms)
+        query = sql.SQL(
+            """
+            SELECT o.ts_utc, o.value
+            FROM {schema}.observations_current o
+            JOIN {schema}.ingestion i ON i.id = o.ingestion_id
+            WHERE i.source = %s AND o.dataset = %s AND o.region = %s AND o.resolution = %s
+              AND o.ts_utc >= %s AND o.ts_utc < %s
+            ORDER BY o.ts_utc
+            """
+        ).format(schema=sql.Identifier(self._schema))
+        with self._conn.cursor() as cur:
+            cur.execute(query, (source, dataset, region, resolution, start, end))
+            rows = cur.fetchall()
+        return tuple(
+            (int(ts_utc.timestamp() * 1000), None if value is None else float(value))
+            for ts_utc, value in rows
+        )
+
     def write_ingestion(self, record: IngestionRecord) -> WriteOutcome:
         """Persist an ingestion atomically; return whether it was a load, no-op, or revision.
 

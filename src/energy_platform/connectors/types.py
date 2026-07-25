@@ -37,6 +37,19 @@ class Dataset(StrEnum):
     CLOUD_COVER = "cloud_cover"  # %
     WIND_SPEED_10M = "wind_speed_10m"  # m/s
 
+    # -- Household telemetry (synthetic demo or real Fenecon), hourly, energy in kWh --
+    # Accounted at the AC coupling point so the node identity holds every hour:
+    #   pv_production + grid_import + battery_discharge
+    #     == household_load + grid_export + battery_charge
+    # (round-trip losses are internal to the battery -- see the SoC continuity invariant).
+    PV_PRODUCTION = "pv_production"  # PV energy delivered to the AC bus, kWh
+    HOUSEHOLD_LOAD = "household_load"  # consumption, kWh
+    BATTERY_CHARGE = "battery_charge"  # AC energy drawn to charge the battery, kWh
+    BATTERY_DISCHARGE = "battery_discharge"  # AC energy delivered from the battery, kWh
+    SOC = "soc"  # state of charge at end of hour, fraction in [soc_min, soc_max]
+    GRID_IMPORT = "grid_import"  # energy imported at the meter, kWh
+    GRID_EXPORT = "grid_export"  # energy exported at the meter, kWh
+
 
 class Resolution(StrEnum):
     """Temporal resolution of a series, matching SMARD's URL tokens."""
