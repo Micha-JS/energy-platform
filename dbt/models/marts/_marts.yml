@@ -1,0 +1,43 @@
+version: 2
+
+models:
+  - name: mart_hourly_energy
+    description: >
+      Energy balance and price for every hour in declared coverage, UTC + Europe/Berlin calendar,
+      NULL where any source has a gap. The M5/M6 foundation. Grain: ts_utc.
+    columns:
+      - name: ts_utc
+        tests: [not_null, unique]
+      - name: local_date
+        tests: [not_null]
+      - name: soc_frac
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 1, config: {where: "soc_frac is not null"}}
+      - name: price_eur_mwh
+        tests:
+          - dbt_utils.accepted_range: {min_value: -500, max_value: 4000, config: {where: "price_eur_mwh is not null"}}
+      - name: pv_production_kwh
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "pv_production_kwh is not null"}}
+      - name: household_load_kwh
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "household_load_kwh is not null"}}
+
+  - name: mart_data_quality
+    description: >
+      Per-source coverage gaps, nulls, and freshness. One row per (source, dataset, region,
+      resolution). A view, so freshness_lag is live.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [source, dataset, region, resolution]
+    columns:
+      - name: source
+        tests: [not_null]
+      - name: dataset
+        tests: [not_null]
+      - name: present_hours
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0}
+      - name: expected_hours
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0}

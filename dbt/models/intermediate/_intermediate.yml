@@ -1,0 +1,23 @@
+version: 2
+
+models:
+  - name: int_hourly_spine
+    description: >
+      Canonical UTC-hour grid over the declared coverage windows. Exactly one row per UTC hour;
+      DST-correct (23h / 25h transition days).
+    columns:
+      - name: ts_utc
+        tests: [not_null, unique]
+
+  - name: int_hourly_energy
+    description: >
+      Hourly energy balance joined with price on the spine; gaps stay NULL. Grain: ts_utc.
+    columns:
+      - name: ts_utc
+        tests: [not_null, unique]
+      - name: soc_frac
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 1, config: {where: "soc_frac is not null"}}
+      - name: price_eur_mwh
+        tests:
+          - dbt_utils.accepted_range: {min_value: -500, max_value: 4000, config: {where: "price_eur_mwh is not null"}}

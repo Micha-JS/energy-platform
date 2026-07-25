@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from collections import Counter
 from collections.abc import Iterator, Sequence
 from contextlib import ExitStack
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -27,6 +29,7 @@ import psycopg
 
 from energy_platform.config import AppConfig
 from energy_platform.connectors.base import MarketDataConnector
+from energy_platform.connectors.offline import DEFAULT_FIXTURES_DIR, offline_transport
 from energy_platform.connectors.open_meteo import USER_AGENT as OPEN_METEO_USER_AGENT
 from energy_platform.connectors.open_meteo import (
     WEATHER_VARIABLES,
@@ -69,6 +72,34 @@ _HOURLY_ONLY = _WEATHER_DATASETS | _TELEMETRY_DATASETS
 # Telemetry derives PV from ingested weather, so weather precedes telemetry; market data is
 # independent. Lower rank runs first.
 _GROUP_RANK: dict[str, int] = {"market": 0, "weather": 1, "telemetry": 2}
+
+# Spellings that enable offline mode via the ENERGY_OFFLINE env var (the --offline flag is the
+# primary switch). Kept deliberately small; anything else is treated as "not set".
+_OFFLINE_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def _resolve_offline(args: argparse.Namespace) -> Path | None:
+    """Return the fixtures directory when offline mode is active, else ``None``.
+
+    Offline mode is enabled by ``--offline`` or ``ENERGY_OFFLINE`` (a secondary env switch). When
+    active it logs an unmissable line so a real run can never be silently served from fixtures.
+    """
+    env = os.environ.get("ENERGY_OFFLINE", "").strip().lower() in _OFFLINE_TRUTHY
+    if not (getattr(args, "offline", False) or env):
+        return None
+    fixtures_dir = args.fixtures_dir or DEFAULT_FIXTURES_DIR
+    logger.warning(
+        "OFFLINE MODE -- serving recorded fixtures from %s (no live API calls)", fixtures_dir
+    )
+    return fixtures_dir
+
+
+def _http_client(offline_dir: Path | None, *, timeout: float, user_agent: str) -> httpx.Client:
+    """Build an HTTP client -- fixture-backed when offline, otherwise a real networked client."""
+    headers = {"User-Agent": user_agent, "Accept": "application/json"}
+    if offline_dir is not None:
+        return httpx.Client(transport=offline_transport(offline_dir), headers=headers)
+    return httpx.Client(timeout=timeout, headers=headers)
 
 
 def _dataset_group(dataset: Dataset) -> str:
@@ -139,6 +170,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Site id for weather datasets (default: the configured default site).",
     )
+    _add_offline_args(backfill)
 
     snapshot = sub.add_parser(
         "forecast-snapshot",
@@ -149,7 +181,34 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Site id to snapshot (default: the configured default site).",
     )
+    snapshot.add_argument(
+        "--issue-date",
+        dest="issue_date",
+        default=None,
+        type=date.fromisoformat,
+        metavar="YYYY-MM-DD",
+        help="Pin the vintage's issue date (issue_time = Berlin midnight of that day) instead of "
+        "'now'. Deterministic; used to seed fixed forecast vintages offline. Default: today.",
+    )
+    _add_offline_args(snapshot)
     return parser
+
+
+def _add_offline_args(subparser: argparse.ArgumentParser) -> None:
+    """Attach the shared ``--offline`` / ``--fixtures-dir`` switches to a subcommand."""
+    subparser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Serve SMARD/Open-Meteo from recorded fixtures instead of the live APIs "
+        "(deterministic, no network). Also enabled by ENERGY_OFFLINE=1.",
+    )
+    subparser.add_argument(
+        "--fixtures-dir",
+        dest="fixtures_dir",
+        default=None,
+        type=Path,
+        help="Directory of recorded fixtures for --offline (default: the repo's test fixtures).",
+    )
 
 
 def _run_backfill(args: argparse.Namespace) -> int:
@@ -171,6 +230,7 @@ def _run_backfill(args: argparse.Namespace) -> int:
     )
 
     config = AppConfig.from_env()
+    offline_dir = _resolve_offline(args)
     outcomes: Counter[WriteOutcome] = Counter()
     days_with_missing = 0
     failures = 0
@@ -180,7 +240,7 @@ def _run_backfill(args: argparse.Namespace) -> int:
         repo.ensure_schema()
         site_id = args.site or config.site.default_id
         _require_weather_dependency(repo, datasets, days, site_id)
-        routes = _build_routes(datasets, config, args, stack, repo, site_id)
+        routes = _build_routes(datasets, config, args, stack, repo, site_id, offline_dir)
 
         for processed, day in enumerate(days, start=1):
             for dataset in datasets:
@@ -215,13 +275,15 @@ def _build_routes(
     stack: ExitStack,
     repo: RawZoneRepository,
     site_id: str,
+    offline_dir: Path | None,
 ) -> dict[Dataset, tuple[MarketDataConnector, str]]:
     """Map each requested dataset to its connector and region, building clients as needed.
 
     Market datasets route to SMARD (region = ``--region``); weather and telemetry route to
     ``site_id`` (resolved once by the caller). Telemetry is generated by the synthetic client,
     which reads the day's ingested irradiance back through ``repo``. Every connector satisfies the
-    same protocol, so the ``ingest_partition`` loop is connector-agnostic.
+    same protocol, so the ``ingest_partition`` loop is connector-agnostic. When ``offline_dir`` is
+    set, the HTTP clients are backed by recorded fixtures instead of the live APIs.
     """
     routes: dict[Dataset, tuple[MarketDataConnector, str]] = {}
     market = [d for d in datasets if _dataset_group(d) == "market"]
@@ -230,10 +292,7 @@ def _build_routes(
 
     if market:
         http = stack.enter_context(
-            httpx.Client(
-                timeout=config.smard.timeout_seconds,
-                headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
-            )
+            _http_client(offline_dir, timeout=config.smard.timeout_seconds, user_agent=USER_AGENT)
         )
         smard = SmardClient(
             http, base_url=config.smard.base_url, max_retries=config.smard.max_retries
@@ -243,9 +302,10 @@ def _build_routes(
 
     if weather:
         http = stack.enter_context(
-            httpx.Client(
+            _http_client(
+                offline_dir,
                 timeout=config.open_meteo.timeout_seconds,
-                headers={"User-Agent": OPEN_METEO_USER_AGENT, "Accept": "application/json"},
+                user_agent=OPEN_METEO_USER_AGENT,
             )
         )
         archive = OpenMeteoArchiveClient(
@@ -305,17 +365,27 @@ def _require_weather_dependency(
 
 def _run_forecast_snapshot(args: argparse.Namespace) -> int:
     config = AppConfig.from_env()
+    offline_dir = _resolve_offline(args)
     site_id = args.site or config.site.default_id
     coordinates = config.site.coordinates
-    # The as-of instant is now; the issue date is today in the partition calendar's timezone.
-    issue_time = datetime.now(UTC)
-    issue_day = datetime.now(ZoneInfo(PARTITION_TIMEZONE)).date()
+    if args.issue_date is not None:
+        # Pinned, deterministic vintage: the as-of instant is Berlin midnight of the issue day
+        # (a fixed UTC instant), so seeding the same day twice is a verifiable no-op.
+        issue_day = args.issue_date
+        issue_time = datetime.combine(
+            issue_day, time.min, tzinfo=ZoneInfo(PARTITION_TIMEZONE)
+        ).astimezone(UTC)
+    else:
+        # The as-of instant is now; the issue date is today in the partition calendar's timezone.
+        issue_time = datetime.now(UTC)
+        issue_day = datetime.now(ZoneInfo(PARTITION_TIMEZONE)).date()
 
     logger.info("Capturing forecast vintage for site %s (issue date %s)", site_id, issue_day)
     with (
-        httpx.Client(
+        _http_client(
+            offline_dir,
             timeout=config.open_meteo.timeout_seconds,
-            headers={"User-Agent": OPEN_METEO_USER_AGENT, "Accept": "application/json"},
+            user_agent=OPEN_METEO_USER_AGENT,
         ) as http,
         psycopg.connect(config.postgres.dsn) as conn,
     ):

@@ -19,6 +19,12 @@ dist/
 dagster_home/
 tmp*/
 
+# dbt build artifacts (package-lock.yml + uv.lock ARE committed for reproducibility)
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+dbt/.user.yml
+
 # Env / secrets
 .env
 *.local

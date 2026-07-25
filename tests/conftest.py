@@ -1,8 +1,10 @@
 """Shared test fixtures.
 
-The SMARD client is exercised entirely offline against recorded fixtures via an
-``httpx.MockTransport`` -- CI makes no live API calls. The Postgres fixtures connect to a
-real database (a service container in CI) and skip cleanly when none is available.
+The SMARD and Open-Meteo clients are exercised entirely offline against recorded fixtures via
+the shared ``httpx.MockTransport`` in :mod:`energy_platform.connectors.offline` -- CI makes no
+live API calls, and tests route through the same fixture-name rules the CLI's ``--offline`` mode
+uses. The Postgres fixtures connect to a real database (a service container in CI) and skip
+cleanly when none is available.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ import psycopg
 import pytest
 
 from energy_platform.config import PostgresConfig
+from energy_platform.connectors.offline import offline_transport
 from energy_platform.connectors.open_meteo import OpenMeteoArchiveClient, OpenMeteoForecastClient
 from energy_platform.connectors.smard import SmardClient
 from energy_platform.orchestration.raw_zone import RawZoneRepository
@@ -26,83 +29,24 @@ FIXTURES_DIR = Path(__file__).parent / "connectors" / "fixtures"
 FIXTURE_COORDINATES = {"home": (52.52, 13.40)}
 
 
-def _fixture_name(url: httpx.URL) -> str:
-    """Map a SMARD request URL to its recorded fixture filename.
-
-    ``.../{filter}/{region}/index_{res}.json`` -> ``{filter}_{region}_index_{res}.json``;
-    weekly files already embed ``{filter}_{region}_{res}_{ts}`` and are used as-is.
-    """
-    parts = url.path.rstrip("/").split("/")
-    filter_id, region, filename = parts[-3], parts[-2], parts[-1]
-    if filename.startswith("index_"):
-        return f"{filter_id}_{region}_{filename}"
-    return filename
-
-
-def smard_mock_transport() -> httpx.MockTransport:
-    def handler(request: httpx.Request) -> httpx.Response:
-        path = FIXTURES_DIR / _fixture_name(request.url)
-        if not path.exists():
-            return httpx.Response(404, text=f"no fixture: {path.name}")
-        return httpx.Response(
-            200,
-            content=path.read_bytes(),
-            headers={"content-type": "application/json"},
-        )
-
-    return httpx.MockTransport(handler)
-
-
 @pytest.fixture
 def smard_client() -> Iterator[SmardClient]:
     """A :class:`SmardClient` served from recorded fixtures (no network, no retries)."""
-    with httpx.Client(transport=smard_mock_transport()) as http:
+    with httpx.Client(transport=offline_transport(FIXTURES_DIR)) as http:
         yield SmardClient(http, max_retries=0, sleep=lambda _: None)
-
-
-def _open_meteo_fixture_name(url: httpx.URL) -> str | None:
-    """Map an Open-Meteo request URL to its fixture filename.
-
-    Archive requests key off their ``start_date`` / ``end_date`` query; the forecast endpoint
-    has a single current-snapshot fixture.
-    """
-    if url.path.endswith("/archive"):
-        start = url.params.get("start_date")
-        end = url.params.get("end_date")
-        return f"open_meteo_archive_{start}_{end}.json"
-    if url.path.endswith("/forecast"):
-        return "open_meteo_forecast.json"
-    return None
-
-
-def open_meteo_mock_transport() -> httpx.MockTransport:
-    def handler(request: httpx.Request) -> httpx.Response:
-        name = _open_meteo_fixture_name(request.url)
-        if name is None:
-            return httpx.Response(404, text=f"unroutable Open-Meteo URL: {request.url}")
-        path = FIXTURES_DIR / name
-        if not path.exists():
-            return httpx.Response(404, text=f"no fixture: {path.name}")
-        return httpx.Response(
-            200,
-            content=path.read_bytes(),
-            headers={"content-type": "application/json"},
-        )
-
-    return httpx.MockTransport(handler)
 
 
 @pytest.fixture
 def open_meteo_archive_client() -> Iterator[OpenMeteoArchiveClient]:
     """An archive client served from offline fixtures (no network, no retries)."""
-    with httpx.Client(transport=open_meteo_mock_transport()) as http:
+    with httpx.Client(transport=offline_transport(FIXTURES_DIR)) as http:
         yield OpenMeteoArchiveClient(http, FIXTURE_COORDINATES, max_retries=0, sleep=lambda _: None)
 
 
 @pytest.fixture
 def open_meteo_forecast_client() -> Iterator[OpenMeteoForecastClient]:
     """A forecast client served from offline fixtures (no network, no retries)."""
-    with httpx.Client(transport=open_meteo_mock_transport()) as http:
+    with httpx.Client(transport=offline_transport(FIXTURES_DIR)) as http:
         yield OpenMeteoForecastClient(
             http,
             FIXTURE_COORDINATES,

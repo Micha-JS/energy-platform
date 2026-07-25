@@ -1,13 +1,18 @@
 # Energy Data Platform
 
+[![CI](https://github.com/Micha-JS/energy-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/Micha-JS/energy-platform/actions/workflows/ci.yml)
+[![dbt docs](https://img.shields.io/badge/dbt%20docs-live-ff694b)](https://micha-js.github.io/energy-platform/)
+
 German day-ahead market data + real PV/battery telemetry (Fenecon Home 10, 8.8 kWp /
 14 kWh) → warehouse → dbt marts → battery dispatch optimizer → ML forecasts → dashboard.
 
-> **Status: M2 — Weather ingestion.** SMARD market data (M1) is now joined by
-> [Open-Meteo](https://open-meteo.com) weather: historical actuals and daily forecast
-> vintages land in the same append-only, content-hashed raw zone via the same idempotent
-> core and backfill CLI. dbt models, the optimizer, forecasting, and the dashboard land in
-> later milestones.
+> **Status: M4 — dbt analytics layer.** A dbt-postgres project turns the append-only raw zone
+> into staging → intermediate → marts: `mart_hourly_energy` gives the household energy balance
+> joined with price for every hour (nulls where sources gap), and `mart_data_quality` summarises
+> coverage and freshness. CI rebuilds the whole warehouse from the real CLI on offline-seeded
+> data — including both DST transitions — and publishes the [dbt docs
+> site](https://micha-js.github.io/energy-platform/). The optimizer, forecasting, and the
+> dashboard land in later milestones.
 
 ## Architecture
 
@@ -139,6 +144,45 @@ Design decisions worth calling out:
 The connectors are unit-tested against offline fixtures / stubs — CI makes no live calls and
 never reaches a live house.
 
+## dbt analytics layer (M4)
+
+The [`dbt/`](dbt/) project (dbt-postgres) transforms the raw zone into an analytics warehouse:
+
+- **Staging** — one model per source (`stg_prices`, `stg_grid_load`, `stg_weather_actuals`,
+  `stg_telemetry`, `stg_weather_forecast`). Reads the latest-wins `observations_current` view,
+  renames to typed unit columns, and derives Europe/Berlin calendar columns from the UTC
+  instants — this is the single place DST semantics live.
+- **Intermediate** — `int_hourly_spine` (a UTC-hour grid) joined to household energy balance and
+  price in `int_hourly_energy`; an hour missing in any source stays **null**, never filled.
+- **Marts** — `mart_hourly_energy` (the M5/M6 foundation: energy balance + price for every hour)
+  and `mart_data_quality` (per-source gaps, nulls, and live freshness).
+
+```bash
+just dbt-deps     # install dbt_utils
+just dbt-seed     # offline-seed the raw zone (recorded fixtures, no network)
+just dbt-build    # build all models + run every test
+just dbt-docs     # generate the docs site into dbt/target
+```
+
+Design decisions worth calling out:
+
+- **DST lives in one layer, tested on the real dates.** Local calendar columns come from
+  `ts_utc AT TIME ZONE 'Europe/Berlin'`; the spine is generated in absolute UTC, so the
+  spring-forward and fall-back days resolve to **23** and **25** rows — asserted by singular tests
+  on 2024-03-31 and 2024-10-27, alongside no-duplicate / no-missing UTC-hour checks. Uniqueness is
+  always keyed on `ts_utc`, never local columns (the fall-back day repeats local 02:00).
+- **The spine is declared, not inferred.** Coverage windows are a dbt `var`, so the two disjoint
+  seeded windows never manifest a phantom void between them — a gap means "missing *within
+  declared coverage*".
+- **No lookahead, enforced structurally.** `stg_weather_forecast` is the only model allowed to read
+  the forecast vintages, and it carries the `(issue_time, target_time)` dimension forward. A pytest
+  over the compiled dbt manifest fails the build if any other model selects from the forecast
+  source — the M2 no-lookahead promise, machine-checked.
+- **CI rebuilds the warehouse from the real pipeline.** The shipped `energy-platform backfill
+  --offline` seeds the raw zone from recorded fixtures (deterministic, zero network) across both
+  DST windows, a re-seed proves idempotency on every PR, then `dbt build` runs all tests and the
+  docs site publishes to GitHub Pages.
+
 ## Engineering invariants
 
 - **Idempotent, re-runnable ingestion** — content-hash verification, safe backfills.
@@ -173,10 +217,19 @@ just demo-down   # stop and drop the Postgres volume
 | `just typecheck` | mypy (strict)                                  |
 | `just test`      | pytest                                         |
 | `just backfill`  | load market + weather history into the raw zone |
+| `just dbt-seed`  | offline-seed the raw zone (recorded fixtures)  |
+| `just dbt-build` | build dbt models + run all tests               |
+| `just dbt-docs`  | generate the dbt docs site                     |
 | `just lock`      | regenerate `uv.lock` after changing deps       |
 
+Any backfill accepts `--offline` (or `ENERGY_OFFLINE=1`) to serve SMARD/Open-Meteo from recorded
+fixtures instead of the live APIs — deterministic and network-free, which is how CI and the demo
+seed the stack.
+
 CI runs the full quality gate (against a Postgres service container, so the raw-zone
-idempotency tests execute) plus `docker compose config` validation on every push and PR.
+idempotency tests execute), a `dbt` job that rebuilds and tests the warehouse on offline-seeded
+data, and `docker compose config` validation on every push and PR; the dbt docs site publishes to
+GitHub Pages on merge to main.
 
 ## License
 

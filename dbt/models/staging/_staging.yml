@@ -1,0 +1,122 @@
+version: 2
+
+models:
+  - name: stg_prices
+    description: Day-ahead wholesale price (EUR/MWh); both resolutions. Grain (ts_utc, region, resolution).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ts_utc, region, resolution]
+    columns:
+      - name: ts_utc
+        tests: [not_null]
+      - name: region
+        tests: [not_null]
+      - name: resolution
+        tests: [not_null]
+      - name: price_eur_mwh
+        description: Day-ahead price; goes negative, so the accepted range allows it.
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: -500
+              max_value: 4000
+              config:
+                where: "price_eur_mwh is not null"
+
+  - name: stg_grid_load
+    description: Total grid load / Netzlast (MW). Grain (ts_utc, region, resolution).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ts_utc, region, resolution]
+    columns:
+      - name: ts_utc
+        tests: [not_null]
+      - name: region
+        tests: [not_null]
+      - name: resolution
+        tests: [not_null]
+      - name: load_mw
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 120000
+              config:
+                where: "load_mw is not null"
+
+  - name: stg_weather_actuals
+    description: Open-Meteo weather actuals, one wide row per UTC hour. Grain (ts_utc, region).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ts_utc, region]
+    columns:
+      - name: ts_utc
+        tests: [not_null]
+      - name: ghi_w_m2
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 1500, config: {where: "ghi_w_m2 is not null"}}
+      - name: direct_radiation_w_m2
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 1500, config: {where: "direct_radiation_w_m2 is not null"}}
+      - name: diffuse_radiation_w_m2
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 1500, config: {where: "diffuse_radiation_w_m2 is not null"}}
+      - name: temperature_c
+        tests:
+          - dbt_utils.accepted_range: {min_value: -40, max_value: 50, config: {where: "temperature_c is not null"}}
+      - name: cloud_cover_pct
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 100, config: {where: "cloud_cover_pct is not null"}}
+      - name: wind_speed_m_s
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 75, config: {where: "wind_speed_m_s is not null"}}
+
+  - name: stg_telemetry
+    description: Household telemetry (kWh), one wide row per UTC hour. Grain (ts_utc, region).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ts_utc, region]
+    columns:
+      - name: ts_utc
+        tests: [not_null]
+      - name: soc_frac
+        description: End-of-hour state of charge, fraction in [0, 1].
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 1, config: {where: "soc_frac is not null"}}
+      - name: pv_production_kwh
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "pv_production_kwh is not null"}}
+      - name: household_load_kwh
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "household_load_kwh is not null"}}
+      - name: battery_charge_kwh
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "battery_charge_kwh is not null"}}
+      - name: battery_discharge_kwh
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "battery_discharge_kwh is not null"}}
+      - name: grid_import_kwh
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "grid_import_kwh is not null"}}
+      - name: grid_export_kwh
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "grid_export_kwh is not null"}}
+
+  - name: stg_weather_forecast
+    description: >
+      Weather forecast vintages, one wide row per (issue_time, target_ts_utc). The only reader of
+      raw.forecast_observations -- see tests/dbt/test_no_lookahead.py.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [issue_date, issue_time, target_ts_utc, region]
+    columns:
+      - name: issue_time
+        tests: [not_null]
+      - name: issue_date
+        tests: [not_null]
+      - name: target_ts_utc
+        tests: [not_null]
+      - name: temperature_c
+        tests:
+          - dbt_utils.accepted_range: {min_value: -40, max_value: 50, config: {where: "temperature_c is not null"}}
+      - name: cloud_cover_pct
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 100, config: {where: "cloud_cover_pct is not null"}}
