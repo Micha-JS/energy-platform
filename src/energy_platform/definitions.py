@@ -9,15 +9,22 @@ attribute and need no changes as milestones accrete.
 from dagster import Definitions
 
 from energy_platform.config import AppConfig
-from energy_platform.orchestration.assets import market_data_assets, weather_assets
+from energy_platform.orchestration.assets import (
+    market_data_assets,
+    telemetry_assets,
+    weather_assets,
+)
 from energy_platform.orchestration.resources import (
+    HomeAssistantResource,
     OpenMeteoArchiveClientResource,
     OpenMeteoForecastClientResource,
     RawZonePostgresResource,
     SmardClientResource,
+    SyntheticTelemetryResource,
 )
 from energy_platform.orchestration.schedules import (
     daily_market_data_schedule,
+    daily_telemetry_schedule,
     daily_weather_actuals_schedule,
     daily_weather_forecast_schedule,
 )
@@ -29,11 +36,12 @@ _config = AppConfig.from_env()
 _coordinates = {site_id: [lat, lon] for site_id, (lat, lon) in _config.site.coordinates.items()}
 
 defs = Definitions(
-    assets=[*market_data_assets, *weather_assets],
+    assets=[*market_data_assets, *weather_assets, *telemetry_assets],
     schedules=[
         daily_market_data_schedule,
         daily_weather_actuals_schedule,
         daily_weather_forecast_schedule,
+        daily_telemetry_schedule,
     ],
     resources={
         "smard": SmardClientResource(
@@ -55,6 +63,29 @@ defs = Definitions(
             forecast_days=_config.open_meteo.forecast_days,
             default_site_id=_config.site.default_id,
             coordinates=_coordinates,
+        ),
+        "synthetic_telemetry": SyntheticTelemetryResource(
+            pv_dc_kwp=_config.pv.dc_kwp,
+            pv_ac_cap_kw=_config.pv.ac_cap_kw,
+            pv_performance_ratio=_config.pv.performance_ratio,
+            pv_temp_coeff_per_c=_config.pv.temp_coeff_per_c,
+            battery_capacity_kwh=_config.battery.capacity_kwh,
+            battery_soc_min=_config.battery.soc_min,
+            battery_soc_max=_config.battery.soc_max,
+            battery_max_charge_kw=_config.battery.max_charge_kw,
+            battery_max_discharge_kw=_config.battery.max_discharge_kw,
+            battery_round_trip_efficiency=_config.battery.round_trip_efficiency,
+            synthetic_salt=_config.synthetic.salt,
+            synthetic_annual_load_kwh=_config.synthetic.annual_load_kwh,
+            default_site_id=_config.site.default_id,
+        ),
+        "home_assistant": HomeAssistantResource(
+            enabled=_config.home_assistant.enabled,
+            base_url=_config.home_assistant.base_url,
+            token=_config.home_assistant.token,
+            verify_tls=_config.home_assistant.verify_tls,
+            entity_map=_config.home_assistant.entities,
+            default_site_id=_config.site.default_id,
         ),
         "raw_zone": RawZonePostgresResource(
             dsn=_config.postgres.dsn,
