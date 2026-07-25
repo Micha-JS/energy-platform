@@ -52,8 +52,7 @@ def main() -> None:
         # Build the exact request the client would issue (URL + params), then GET it directly so
         # the recorded body matches production without exposing the token in the fixture.
         client = HomeAssistantClient(http, base_url, {Dataset.PV_PRODUCTION: entity})
-        url = client._history_url(window.start_ms)
-        params = client._history_params(entity, window.end_ms)
+        url, params = client.build_history_request(entity, window)
         raw = http.get(url, params=params).content
 
     out = FIXTURES / "home_assistant_pv_power.json"

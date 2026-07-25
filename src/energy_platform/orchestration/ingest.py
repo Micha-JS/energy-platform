@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 from energy_platform.connectors.base import MarketDataConnector
 from energy_platform.connectors.open_meteo import WEATHER_VARIABLES, OpenMeteoForecastClient
+from energy_platform.connectors.synthetic import WEATHER_SOURCE
 from energy_platform.connectors.types import Dataset, Point, Resolution, UtcWindow
 from energy_platform.orchestration.raw_zone import (
     ForecastIngestionRecord,
@@ -135,6 +136,46 @@ def ingest_partition(
         expected_count=record.expected_count,
         hours_in_day=record.hours_in_day,
     )
+
+
+class WeatherDependencyError(RuntimeError):
+    """Raised when synthetic telemetry is requested for days whose weather is not yet ingested.
+
+    Synthetic PV derives from that day's ingested irradiance; a missing day would silently yield
+    all-null PV. Both the CLI backfill and the Dagster telemetry asset call
+    :func:`require_weather_ingested` so they fail identically -- loudly, never green-with-nulls.
+    """
+
+
+def require_weather_ingested(
+    repo: RawZoneRepository,
+    site_id: str,
+    days: Sequence[date],
+    *,
+    resolution: Resolution = Resolution.HOUR,
+    hint: str | None = None,
+) -> None:
+    """Raise :class:`WeatherDependencyError` if any of ``days`` lacks ingested weather.
+
+    Probes the shortwave-radiation series (the irradiance PV derives from); presence of its latest
+    hash is the signal that the day's weather actuals are in the raw zone. ``hint`` appends
+    entry-point-specific remediation advice to the message.
+    """
+    probe = Dataset.SHORTWAVE_RADIATION.value
+    missing = [
+        day
+        for day in days
+        if repo.latest_hash(WEATHER_SOURCE, probe, site_id, resolution.value, day) is None
+    ]
+    if not missing:
+        return
+    message = (
+        f"telemetry requires ingested weather for site '{site_id}', but "
+        f"{len(missing)} of {len(days)} day(s) have none (first: {missing[0].isoformat()})."
+    )
+    if hint:
+        message = f"{message} {hint}"
+    raise WeatherDependencyError(message)
 
 
 # -- Forecast vintages -----------------------------------------------------------------

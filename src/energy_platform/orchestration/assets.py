@@ -22,7 +22,11 @@ from dagster import (
 from energy_platform.connectors.open_meteo import WEATHER_VARIABLES
 from energy_platform.connectors.synthetic import TELEMETRY_DATASETS
 from energy_platform.connectors.types import Dataset, Resolution
-from energy_platform.orchestration.ingest import ingest_forecast_vintage, ingest_partition
+from energy_platform.orchestration.ingest import (
+    ingest_forecast_vintage,
+    ingest_partition,
+    require_weather_ingested,
+)
 from energy_platform.orchestration.partitions import (
     PARTITION_TIMEZONE,
     daily_de_partitions,
@@ -323,6 +327,10 @@ def synthetic_telemetry_raw(
     # through it) and the write target, so the coupled simulation runs once and all seven series
     # persist over a single connection.
     with raw_zone.get_repository() as repo:
+        # Same guard the CLI backfill uses: telemetry schedules run independently of the weather
+        # schedule (and the asset dep does not order separately-scheduled jobs), so a missing/late
+        # weather partition must fail the run loudly rather than emit all-null PV as green.
+        require_weather_ingested(repo, site_id, [day])
         client = synthetic_telemetry.build(repo)
         for dataset in TELEMETRY_DATASETS:
             result = ingest_partition(
