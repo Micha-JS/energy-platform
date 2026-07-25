@@ -37,7 +37,6 @@ import json
 import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
-from itertools import pairwise
 from typing import Any, Final
 
 import httpx
@@ -61,6 +60,14 @@ _EPOCH: Final = datetime(1970, 1, 1, tzinfo=UTC)
 
 class HomeAssistantError(RuntimeError):
     """Raised when Home Assistant data cannot be retrieved or parsed."""
+
+
+class _RetryableError(HomeAssistantError):
+    """Internal marker for transient failures (retryable status codes) worth another attempt.
+
+    Parse failures and 4xx responses are *not* this -- they are permanent and short-circuit the
+    retry loop -- so only transport errors and this are retried.
+    """
 
 
 class HomeAssistantClient:
@@ -108,8 +115,7 @@ class HomeAssistantClient:
                 "set ENERGY_HA_ENTITY_MAP"
             )
 
-        url = self._history_url(window.start_ms)
-        params = self._history_params(entity, window.end_ms)
+        url, params = self.build_history_request(entity, window)
         samples = _parse_history(self._get_json(url, params), entity)
 
         if dataset in _LEVEL_DATASETS:
@@ -132,6 +138,15 @@ class HomeAssistantClient:
             points=points,
         )
 
+    def build_history_request(self, entity: str, window: UtcWindow) -> tuple[str, dict[str, Any]]:
+        """The exact ``(url, params)`` this client GETs for ``entity`` over ``window``.
+
+        Public so the fixture recorder can replay the identical request without reaching into
+        private helpers -- keeping the recorded shape from drifting from production.
+        ``fetch_window`` routes through here too, so there is one source of truth for the request.
+        """
+        return self._history_url(window.start_ms), self._history_params(entity, window.end_ms)
+
     def _history_url(self, start_ms: int) -> str:
         start = _iso(start_ms)
         return f"{self._base_url}/api/history/period/{start}"
@@ -150,18 +165,21 @@ class HomeAssistantClient:
             try:
                 response = self._http.get(url, params=params)
                 if response.status_code in _RETRYABLE_STATUS:
-                    raise HomeAssistantError(f"Home Assistant returned {response.status_code}")
+                    raise _RetryableError(f"Home Assistant returned {response.status_code}")
                 response.raise_for_status()
-                try:
-                    return response.json()
-                except json.JSONDecodeError as exc:
-                    raise HomeAssistantError("Home Assistant returned a non-JSON body") from exc
-            except (httpx.TransportError, HomeAssistantError) as exc:
+            except (httpx.TransportError, _RetryableError) as exc:
                 last_exc = exc
                 if attempt < self._max_retries:
                     self._sleep(0.5 * (2**attempt))
+                continue
             except httpx.HTTPStatusError as exc:  # 4xx (e.g. 401 bad token) -- permanent
                 raise HomeAssistantError(f"Home Assistant request failed: {url}") from exc
+            # Success path: a parse failure is deterministic, so short-circuit like the 4xx path
+            # rather than retrying a body that will never become valid JSON.
+            try:
+                return response.json()
+            except json.JSONDecodeError as exc:
+                raise HomeAssistantError(f"Home Assistant returned a non-JSON body: {url}") from exc
         raise HomeAssistantError(f"Home Assistant failed after retries: {url}") from last_exc
 
 
@@ -195,16 +213,31 @@ def _integrate_power_kwh(samples: list[_Sample], h0: int, h1: int) -> float | No
 
     Returns ``None`` if any sub-interval of the hour has no known numeric value -- the state
     before it is unavailable/unknown, or nothing is known at ``h0`` (uncovered start).
+
+    Walks the pre-sorted samples with a single forward cursor (no per-boundary rescan), so a day's
+    conversion is linear in the sample count rather than quadratic.
     """
-    boundaries = [h0, *(ts for ts, _ in samples if h0 < ts < h1), h1]
+    n = len(samples)
+    # Active value at h0: the most recent sample at or before the hour's start.
+    idx = 0
+    active: float | None = None
+    while idx < n and samples[idx][0] <= h0:
+        active = samples[idx][1]
+        idx += 1
+
     wh = 0.0
-    for a, b in pairwise(boundaries):
-        if b <= a:
-            continue
-        active = _active_value(samples, a)
+    cursor = h0
+    while cursor < h1:
+        # The next boundary is the next sample inside the hour, else the hour's end.
+        nxt = samples[idx][0] if idx < n and samples[idx][0] < h1 else h1
         if active is None:
             return None
-        wh += active * (b - a) / _HOUR_MS  # W * hours -> Wh
+        wh += active * (nxt - cursor) / _HOUR_MS  # W * hours -> Wh
+        cursor = nxt
+        # Adopt every sample landing at the new cursor (<= handles duplicate timestamps).
+        while idx < n and samples[idx][0] <= cursor:
+            active = samples[idx][1]
+            idx += 1
     return wh / 1000.0
 
 

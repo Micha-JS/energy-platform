@@ -19,7 +19,12 @@ from energy_platform.connectors.synthetic import (
     utc_hour_instants,
 )
 from energy_platform.connectors.types import Dataset, RawSeries, Resolution, UtcWindow
-from energy_platform.orchestration.ingest import berlin_day_window, ingest_partition
+from energy_platform.orchestration.ingest import (
+    WeatherDependencyError,
+    berlin_day_window,
+    ingest_partition,
+    require_weather_ingested,
+)
 from energy_platform.orchestration.raw_zone import RawZoneRepository, WriteOutcome
 
 pytestmark = pytest.mark.postgres
@@ -99,6 +104,16 @@ def test_read_current_series_returns_ingested_weather(raw_repo: RawZoneRepositor
     )
     assert len(points) == WINDOW.expected_count(Resolution.HOUR)
     assert max(v for _, v in points if v is not None) > 0
+
+
+def test_require_weather_ingested_guards_missing_irradiance(raw_repo: RawZoneRepository) -> None:
+    # The shared guard the CLI backfill and the synthetic telemetry asset both call: with no
+    # weather ingested it must raise, so a missing/late weather partition fails the run loudly
+    # instead of silently emitting all-null PV as a green materialization.
+    with pytest.raises(WeatherDependencyError, match="requires ingested weather"):
+        require_weather_ingested(raw_repo, SITE, [DAY])
+    _ingest_weather(raw_repo, ghi_peak=800.0)
+    require_weather_ingested(raw_repo, SITE, [DAY])  # now present -> no raise
 
 
 def test_telemetry_reingest_is_a_noop(raw_repo: RawZoneRepository) -> None:

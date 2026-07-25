@@ -140,6 +140,51 @@ def test_malformed_payload_raises() -> None:
         client.fetch_window(Dataset.PV_PRODUCTION, "home", Resolution.HOUR, WINDOW)
 
 
+def test_non_json_body_is_permanent_and_not_retried() -> None:
+    # A 200 with a non-JSON body (e.g. an HTML error page) is a deterministic parse failure, so it
+    # must short-circuit like the 4xx path -- not burn the retry budget as if it were transient.
+    calls = 0
+    sleeps: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, text="<html>gateway error</html>")
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    client = HomeAssistantClient(
+        http,
+        "http://ha.local",
+        {Dataset.PV_PRODUCTION: "sensor.pv_power"},
+        max_retries=3,
+        sleep=sleeps.append,
+    )
+    with pytest.raises(HomeAssistantError, match="non-JSON body"):
+        client.fetch_window(Dataset.PV_PRODUCTION, "home", Resolution.HOUR, WINDOW)
+    assert calls == 1  # short-circuited on the first response
+    assert sleeps == []  # no backoff slept
+
+
+def test_high_frequency_power_integrates_correctly_at_scale() -> None:
+    # A sample every minute across the whole window (~1440 samples) at a constant 1500 W. Every
+    # fully-covered hour integrates to 1.5 kWh; exercises the single-cursor path under a busy
+    # sensor where the old per-boundary rescan was quadratic.
+    step_ms = 60_000
+    payload = [
+        [
+            {
+                "state": "1500",
+                "last_changed": datetime.fromtimestamp(t / 1000, tz=UTC).isoformat(),
+            }
+            for t in range(WINDOW.start_ms, WINDOW.end_ms, step_ms)
+        ]
+    ]
+    client = _client(payload, {Dataset.GRID_IMPORT: "sensor.import"})
+    raw = client.fetch_window(Dataset.GRID_IMPORT, "home", Resolution.HOUR, WINDOW)
+    assert len(raw.points) == 24
+    assert all(value == pytest.approx(1.5) for _, value in raw.points)
+
+
 def test_reads_only_the_history_endpoint() -> None:
     # The read-only contract: the connector must only ever GET .../api/history/period/...
     seen: list[Callable[..., Any] | str] = []

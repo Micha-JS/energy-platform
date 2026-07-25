@@ -6,7 +6,7 @@ webserver and daemon load. ``workspace.yaml`` / ``dagster.yaml`` point at the ``
 attribute and need no changes as milestones accrete.
 """
 
-from dagster import Definitions
+from dagster import Definitions, EnvVar
 
 from energy_platform.config import AppConfig
 from energy_platform.orchestration.assets import (
@@ -82,7 +82,10 @@ defs = Definitions(
         "home_assistant": HomeAssistantResource(
             enabled=_config.home_assistant.enabled,
             base_url=_config.home_assistant.base_url,
-            token=_config.home_assistant.token,
+            # Resolve the token at run time from the environment rather than baking its value into
+            # the resource config -- otherwise Dagster serialises the long-lived token into run
+            # storage and renders it in the launchpad UI. EnvVar keeps only the var *name* on disk.
+            token=EnvVar("ENERGY_HA_TOKEN"),
             verify_tls=_config.home_assistant.verify_tls,
             entity_map=_config.home_assistant.entities,
             default_site_id=_config.site.default_id,
