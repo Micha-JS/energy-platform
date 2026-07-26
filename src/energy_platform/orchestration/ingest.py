@@ -12,7 +12,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from energy_platform.connectors.base import MarketDataConnector
@@ -27,6 +27,8 @@ from energy_platform.orchestration.raw_zone import (
 )
 
 BERLIN = ZoneInfo("Europe/Berlin")
+# Point timestamps are epoch milliseconds; this turns one back into a calendar date.
+_UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 def berlin_day_window(day: date) -> UtcWindow:
@@ -234,6 +236,36 @@ class ForecastIngestResult:
         return self.null_count > 0
 
 
+class ForecastHorizonError(RuntimeError):
+    """Raised when a vintage's targets reach beyond the horizon it claims to cover."""
+
+
+def _require_targets_within_horizon(
+    series: Mapping[Dataset, tuple[Point, ...]], issue_day: date, horizon_days: int
+) -> None:
+    """Reject a vintage whose furthest target lies past ``issue_day + horizon_days``.
+
+    ``horizon_days`` is stored as a fact about the vintage, so a mismatch between the label and the
+    data it describes is corruption, not a rounding detail: an issue date pinned independently of
+    the payload (offline seeding, a replayed fixture) can otherwise stamp a snapshot with a time it
+    never described, and nothing downstream can detect it.
+
+    Only the forward bound is checked. Targets *earlier* than the issue day are legitimate --
+    ``past_days`` deliberately pulls a slice before the issue instant so the issue day's earliest
+    hours are present -- and the day granularity leaves the timezone offset well inside tolerance.
+    """
+    latest = max((ts for points in series.values() for ts, _ in points), default=None)
+    if latest is None:
+        return
+    latest_day = (_UNIX_EPOCH + timedelta(milliseconds=latest)).date()
+    horizon_end = issue_day + timedelta(days=horizon_days)
+    if latest_day > horizon_end:
+        raise ForecastHorizonError(
+            f"forecast vintage issued {issue_day} claims a {horizon_days}-day horizon but reaches "
+            f"{latest_day} (past {horizon_end}) -- the issue date does not describe this payload"
+        )
+
+
 def ingest_forecast_vintage(
     client: OpenMeteoForecastClient,
     repo: RawZoneRepository,
@@ -251,6 +283,7 @@ def ingest_forecast_vintage(
     fixed instant in tests), stored so backtests can reconstruct exactly what was known when.
     """
     forecast = client.fetch_forecast(site_id, resolution, variables)
+    _require_targets_within_horizon(forecast.series, issue_day, client.forecast_days)
     digest = forecast_content_hash(forecast.source, site_id, resolution, issue_day, forecast.series)
     payload = {variable.value: list(points) for variable, points in forecast.series.items()}
 

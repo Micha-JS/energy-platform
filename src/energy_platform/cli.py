@@ -29,7 +29,11 @@ import psycopg
 
 from energy_platform.config import AppConfig
 from energy_platform.connectors.base import MarketDataConnector
-from energy_platform.connectors.offline import DEFAULT_FIXTURES_DIR, offline_transport
+from energy_platform.connectors.offline import (
+    DEFAULT_FIXTURES_DIR,
+    forecast_fixture_issue_date,
+    offline_transport,
+)
 from energy_platform.connectors.open_meteo import USER_AGENT as OPEN_METEO_USER_AGENT
 from energy_platform.connectors.open_meteo import (
     WEATHER_VARIABLES,
@@ -87,7 +91,7 @@ def _resolve_offline(args: argparse.Namespace) -> Path | None:
     env = os.environ.get("ENERGY_OFFLINE", "").strip().lower() in _OFFLINE_TRUTHY
     if not (getattr(args, "offline", False) or env):
         return None
-    fixtures_dir = args.fixtures_dir or DEFAULT_FIXTURES_DIR
+    fixtures_dir = getattr(args, "fixtures_dir", None) or DEFAULT_FIXTURES_DIR
     logger.warning(
         "OFFLINE MODE -- serving recorded fixtures from %s (no live API calls)", fixtures_dir
     )
@@ -100,6 +104,11 @@ def _http_client(offline_dir: Path | None, *, timeout: float, user_agent: str) -
     if offline_dir is not None:
         return httpx.Client(transport=offline_transport(offline_dir), headers=headers)
     return httpx.Client(timeout=timeout, headers=headers)
+
+
+def _berlin_midnight(day: date) -> datetime:
+    """The UTC instant of Berlin midnight starting ``day`` -- a fixed, deterministic as-of time."""
+    return datetime.combine(day, time.min, tzinfo=ZoneInfo(PARTITION_TIMEZONE)).astimezone(UTC)
 
 
 def _dataset_group(dataset: Dataset) -> str:
@@ -188,7 +197,8 @@ def _build_parser() -> argparse.ArgumentParser:
         type=date.fromisoformat,
         metavar="YYYY-MM-DD",
         help="Pin the vintage's issue date (issue_time = Berlin midnight of that day) instead of "
-        "'now'. Deterministic; used to seed fixed forecast vintages offline. Default: today.",
+        "'now'. Rejected if the fetched horizon reaches past it. Default: today -- or, with "
+        "--offline, the issue date the recorded fixture actually represents.",
     )
     _add_offline_args(snapshot)
     return parser
@@ -372,9 +382,14 @@ def _run_forecast_snapshot(args: argparse.Namespace) -> int:
         # Pinned, deterministic vintage: the as-of instant is Berlin midnight of the issue day
         # (a fixed UTC instant), so seeding the same day twice is a verifiable no-op.
         issue_day = args.issue_date
-        issue_time = datetime.combine(
-            issue_day, time.min, tzinfo=ZoneInfo(PARTITION_TIMEZONE)
-        ).astimezone(UTC)
+        issue_time = _berlin_midnight(issue_day)
+    elif offline_dir is not None:
+        # Offline serves one recorded snapshot, so "now" would label it with an issue date it does
+        # not describe. Derive the vintage's real issue day from the fixture instead --
+        # deterministic, without pinning a literal that drifts when the fixture is re-recorded.
+        issue_day = forecast_fixture_issue_date(offline_dir)
+        issue_time = _berlin_midnight(issue_day)
+        logger.info("Offline vintage: issue date %s, derived from the recorded fixture", issue_day)
     else:
         # The as-of instant is now; the issue date is today in the partition calendar's timezone.
         issue_time = datetime.now(UTC)

@@ -1,0 +1,23 @@
+version: 2
+
+unit_tests:
+  # The no-lookahead invariant, asserted on data rather than on SQL text (tests/dbt/test_no_lookahead.py
+  # covers the text). Two vintages predicting the SAME target instant must both survive as
+  # independent rows: collapsing them to "latest" would silently reintroduce lookahead into every
+  # backtest. This is the assertion the second offline seed vintage used to stand in for -- the
+  # recorded fixture can only yield one honest vintage (forecasts accrue forward, never backwards),
+  # so it is tested here with deterministic rows instead.
+  - name: forecast_vintages_do_not_collapse
+    model: stg_weather_forecast
+    description: >
+      Same target_ts_utc, two issue_times -> two rows, each carrying its own vintage columns and
+      its own predicted value. Fails on any model that groups the issue dimension away.
+    given:
+      - input: source('raw', 'forecast_observations')
+        rows:
+          - {source: "open_meteo", region: "home", resolution: "hour", variable: "temperature_2m", issue_date: "2026-07-24", issue_time: "2026-07-24 06:00:00+00", target_ts_utc: "2026-07-26 12:00:00+00", value: 21.5, is_missing: false}
+          - {source: "open_meteo", region: "home", resolution: "hour", variable: "temperature_2m", issue_date: "2026-07-25", issue_time: "2026-07-25 06:00:00+00", target_ts_utc: "2026-07-26 12:00:00+00", value: 23.0, is_missing: false}
+    expect:
+      rows:
+        - {source: "open_meteo", region: "home", issue_date: "2026-07-24", issue_time: "2026-07-24 06:00:00+00", target_ts_utc: "2026-07-26 12:00:00+00", temperature_c: 21.5}
+        - {source: "open_meteo", region: "home", issue_date: "2026-07-25", issue_time: "2026-07-25 06:00:00+00", target_ts_utc: "2026-07-26 12:00:00+00", temperature_c: 23.0}

@@ -18,22 +18,23 @@ unit_tests:
     given:
       - input: ref('stg_telemetry')
         rows:
-          - {region: "siteB"}
+          - {source: "synthetic", region: "siteB"}
     expect:
       format: csv
       fixture: expect_spine_single_site
 
-  # Regression for the M4 review finding: the price join lacked a region predicate, so a second
-  # ingested price region at the same ts_utc fanned out and doubled every spine row. Fixed by
-  # keying the join on the price_region var (default 'DE'). Telemetry non-null per site is asserted
-  # in the same shot (the join carries the site through).
+  # Regression for two M4 review findings: the price join lacked a region predicate (a second
+  # ingested price region at the same ts_utc fanned out and doubled every spine row), and staging
+  # dropped `source` (a second provider for the same zone would do the same). Fixed by keying the
+  # join on the price_region and price_source vars. Telemetry non-null per site is asserted in the
+  # same shot (the join carries the site through).
   - name: price_join_does_not_fan_out_across_regions
     model: int_hourly_energy
     description: >
-      Two price regions ('DE' and a distinct 'DE2') at the same ts_utc must NOT multiply rows: the
-      grain stays one row per (ts_utc, region) and only the 'DE' price attaches. Two sites confirm
-      telemetry flows through non-null. Fails on the pre-fix model, whose region-less price join
-      emits four rows.
+      Neither a second price region ('DE2') nor a second provider ('entsoe' on the same 'DE' zone)
+      may multiply rows: the grain stays one row per (ts_utc, region) and only the SMARD 'DE' price
+      attaches. Two sites confirm telemetry flows through non-null. Fails on the pre-fix model,
+      whose unqualified price join emits six rows.
     given:
       - input: ref('int_hourly_spine')
         rows:
@@ -41,12 +42,13 @@ unit_tests:
           - {ts_utc: "2024-06-12 10:00:00+00", region: "siteB", local_ts: "2024-06-12 12:00:00", local_date: "2024-06-12", local_hour: 12}
       - input: ref('stg_telemetry')
         rows:
-          - {ts_utc: "2024-06-12 10:00:00+00", region: "home",  pv_production_kwh: 3.0, household_load_kwh: 1.0, battery_charge_kwh: 0.5, battery_discharge_kwh: 0.2, soc_frac: 0.6, grid_import_kwh: 0.4, grid_export_kwh: 0.1}
-          - {ts_utc: "2024-06-12 10:00:00+00", region: "siteB", pv_production_kwh: 3.0, household_load_kwh: 1.0, battery_charge_kwh: 0.5, battery_discharge_kwh: 0.2, soc_frac: 0.6, grid_import_kwh: 0.4, grid_export_kwh: 0.1}
+          - {source: "synthetic", ts_utc: "2024-06-12 10:00:00+00", region: "home",  pv_production_kwh: 3.0, household_load_kwh: 1.0, battery_charge_kwh: 0.5, battery_discharge_kwh: 0.2, soc_frac: 0.6, grid_import_kwh: 0.4, grid_export_kwh: 0.1}
+          - {source: "synthetic", ts_utc: "2024-06-12 10:00:00+00", region: "siteB", pv_production_kwh: 3.0, household_load_kwh: 1.0, battery_charge_kwh: 0.5, battery_discharge_kwh: 0.2, soc_frac: 0.6, grid_import_kwh: 0.4, grid_export_kwh: 0.1}
       - input: ref('stg_prices')
         rows:
-          - {ts_utc: "2024-06-12 10:00:00+00", region: "DE",  resolution: "hour", price_eur_mwh: 50.0}
-          - {ts_utc: "2024-06-12 10:00:00+00", region: "DE2", resolution: "hour", price_eur_mwh: 999.0}
+          - {source: "smard",  ts_utc: "2024-06-12 10:00:00+00", region: "DE",  resolution: "hour", price_eur_mwh: 50.0}
+          - {source: "smard",  ts_utc: "2024-06-12 10:00:00+00", region: "DE2", resolution: "hour", price_eur_mwh: 999.0}
+          - {source: "entsoe", ts_utc: "2024-06-12 10:00:00+00", region: "DE",  resolution: "hour", price_eur_mwh: 777.0}
     expect:
       rows:
         - {ts_utc: "2024-06-12 10:00:00+00", region: "home",  price_eur_mwh: 50.0, pv_production_kwh: 3.0, household_load_kwh: 1.0, soc_frac: 0.6, balance_residual_kwh: 2.0}

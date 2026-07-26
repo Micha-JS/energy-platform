@@ -46,3 +46,15 @@ vars:
   # prices under. int_hourly_energy filters the price join to this zone so a second ingested price
   # region can never fan out the spine. Override for a different market.
   price_region: "DE"
+
+  # The price provider, for the same reason: a second market connector (ENTSO-E) would publish the
+  # same bidding zone at the same instant, and the price join must attach exactly one of them.
+  # 'smard' is the only connector that ingests prices today.
+  price_source: "smard"
+
+  # `telemetry_source` selects which connector the energy models read when more than one writes the
+  # same site (the synthetic demo generator and the real Fenecon reader both default to
+  # region = site_id). Deliberately NOT declared here: no default is safe -- 'synthetic' would drop
+  # a real house, 'fenecon' would empty the demo -- so with two sources present and no override,
+  # assert_single_telemetry_source_per_site fails and names the var. Set it explicitly:
+  #   dbt build --vars '{telemetry_source: fenecon}'
