@@ -1,0 +1,23 @@
+version: 2
+
+unit_tests:
+  # Regression for the M4 review finding: mart_data_quality INNER-joined observations to ingestion,
+  # so a source ingested with zero observation rows vanished from the report instead of surfacing as
+  # a 100% gap -- the one case the quality mart most needs to show. Fixed by making ingestion the
+  # driving side (LEFT JOIN) and coalescing observation counts to 0.
+  - name: missing_source_surfaces_as_full_gap
+    model: mart_data_quality
+    description: >
+      A partition ingested with expected_count > 0 but no observation rows must appear with
+      present_hours = 0 and gap_hours = expected_hours. Fails on the pre-fix model, whose INNER join
+      drops the source entirely. (now()-derived columns are non-deterministic and intentionally not
+      asserted -- unit tests compare only the columns named here.)
+    given:
+      - input: source('raw', 'ingestion')
+        rows:
+          - {id: 1, source: "smard", dataset: "day_ahead_price", region: "DE", resolution: "hour", partition_date: "2024-06-12", expected_count: 24, fetched_at: "2024-06-13 00:00:00+00"}
+      - input: source('raw', 'observations_current')
+        rows: []
+    expect:
+      rows:
+        - {source: "smard", dataset: "day_ahead_price", region: "DE", resolution: "hour", expected_hours: 24, present_hours: 0, gap_hours: 24, null_count: 0}

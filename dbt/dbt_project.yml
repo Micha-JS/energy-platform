@@ -40,3 +40,9 @@ vars:
   coverage_windows:
     - {start: "2024-03-28", end: "2024-04-03"}
     - {start: "2024-10-24", end: "2024-10-30"}
+
+  # The bidding zone whose day-ahead price the energy mart attaches. 'DE' is the DE-LU
+  # (Germany-Luxembourg) zone as SMARD labels it -- the region string the CLI actually ingests
+  # prices under. int_hourly_energy filters the price join to this zone so a second ingested price
+  # region can never fan out the spine. Override for a different market.
+  price_region: "DE"

@@ -122,6 +122,9 @@ jobs:
       - name: dbt docs generate
         run: uv run --project dbt dbt docs generate --project-dir dbt --profiles-dir dbt
       - name: Upload docs as Pages artifact
+        # Only main deploys to Pages (see the `pages` job), so only main needs the artifact --
+        # building/uploading it on branch/PR runs is wasted work.
+        if: github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
         with:
           path: dbt/target

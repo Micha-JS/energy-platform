@@ -43,19 +43,22 @@ observation_agg as (
     group by i.source, o.dataset, o.region, o.resolution
 )
 
+-- Ingestion is the driving side (LEFT JOIN): a source ingested with expected_hours > 0 but zero
+-- observation rows must surface as a 100% gap, not vanish. coalesce collapses the no-observations
+-- case to present_hours = 0 so gap_hours reports the full miss; min/max ts stay NULL (no rows).
 select
     ing.source,
     ing.dataset,
     ing.region,
     ing.resolution,
     ing.expected_hours,
-    obs.present_hours,
-    ing.expected_hours - obs.present_hours as gap_hours,
-    obs.null_count,
+    coalesce(obs.present_hours, 0)                    as present_hours,
+    ing.expected_hours - coalesce(obs.present_hours, 0) as gap_hours,
+    coalesce(obs.null_count, 0)                       as null_count,
     obs.min_ts_utc,
     obs.max_ts_utc,
     ing.last_fetched_at,
     now() - ing.last_fetched_at as freshness_lag
 from ingestion_agg ing
-join observation_agg obs
+left join observation_agg obs
     using (source, dataset, region, resolution)

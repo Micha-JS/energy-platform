@@ -1,0 +1,53 @@
+version: 2
+
+unit_tests:
+  # Regression for the M4 review finding: int_hourly_spine hardcoded region='home', so a non-default
+  # --site produced an all-NULL telemetry mart. The site dimension must come from staged telemetry.
+  # Fixed by cross-joining the hour grid with `select distinct region from stg_telemetry`.
+  - name: spine_expands_per_site_not_hardcoded_home
+    model: int_hourly_spine
+    description: >
+      Sites come from telemetry, not a hardcoded literal. With telemetry present only for a
+      non-default site, every spine hour carries that site. Overridden to a single non-DST Berlin
+      day so the expected grid is a clean 24-hour UTC+2 mapping. Fails on the pre-fix model, which
+      does not read stg_telemetry and emits region='home'.
+    overrides:
+      vars:
+        coverage_windows:
+          - {start: "2024-06-12", end: "2024-06-12"}
+    given:
+      - input: ref('stg_telemetry')
+        rows:
+          - {region: "siteB"}
+    expect:
+      format: csv
+      fixture: expect_spine_single_site
+
+  # Regression for the M4 review finding: the price join lacked a region predicate, so a second
+  # ingested price region at the same ts_utc fanned out and doubled every spine row. Fixed by
+  # keying the join on the price_region var (default 'DE'). Telemetry non-null per site is asserted
+  # in the same shot (the join carries the site through).
+  - name: price_join_does_not_fan_out_across_regions
+    model: int_hourly_energy
+    description: >
+      Two price regions ('DE' and a distinct 'DE2') at the same ts_utc must NOT multiply rows: the
+      grain stays one row per (ts_utc, region) and only the 'DE' price attaches. Two sites confirm
+      telemetry flows through non-null. Fails on the pre-fix model, whose region-less price join
+      emits four rows.
+    given:
+      - input: ref('int_hourly_spine')
+        rows:
+          - {ts_utc: "2024-06-12 10:00:00+00", region: "home",  local_ts: "2024-06-12 12:00:00", local_date: "2024-06-12", local_hour: 12}
+          - {ts_utc: "2024-06-12 10:00:00+00", region: "siteB", local_ts: "2024-06-12 12:00:00", local_date: "2024-06-12", local_hour: 12}
+      - input: ref('stg_telemetry')
+        rows:
+          - {ts_utc: "2024-06-12 10:00:00+00", region: "home",  pv_production_kwh: 3.0, household_load_kwh: 1.0, battery_charge_kwh: 0.5, battery_discharge_kwh: 0.2, soc_frac: 0.6, grid_import_kwh: 0.4, grid_export_kwh: 0.1}
+          - {ts_utc: "2024-06-12 10:00:00+00", region: "siteB", pv_production_kwh: 3.0, household_load_kwh: 1.0, battery_charge_kwh: 0.5, battery_discharge_kwh: 0.2, soc_frac: 0.6, grid_import_kwh: 0.4, grid_export_kwh: 0.1}
+      - input: ref('stg_prices')
+        rows:
+          - {ts_utc: "2024-06-12 10:00:00+00", region: "DE",  resolution: "hour", price_eur_mwh: 50.0}
+          - {ts_utc: "2024-06-12 10:00:00+00", region: "DE2", resolution: "hour", price_eur_mwh: 999.0}
+    expect:
+      rows:
+        - {ts_utc: "2024-06-12 10:00:00+00", region: "home",  price_eur_mwh: 50.0, pv_production_kwh: 3.0, household_load_kwh: 1.0, soc_frac: 0.6, balance_residual_kwh: 2.0}
+        - {ts_utc: "2024-06-12 10:00:00+00", region: "siteB", price_eur_mwh: 50.0, pv_production_kwh: 3.0, household_load_kwh: 1.0, soc_frac: 0.6, balance_residual_kwh: 2.0}
