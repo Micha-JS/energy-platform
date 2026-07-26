@@ -6,12 +6,14 @@
 German day-ahead market data + real PV/battery telemetry (Fenecon Home 10, 8.8 kWp /
 14 kWh) → warehouse → dbt marts → battery dispatch optimizer → ML forecasts → dashboard.
 
-> **Status: M4 — dbt analytics layer.** A dbt-postgres project turns the append-only raw zone
-> into staging → intermediate → marts: `mart_hourly_energy` gives the household energy balance
-> joined with price for every hour (nulls where sources gap), and `mart_data_quality` summarises
-> coverage and freshness. CI rebuilds the whole warehouse from the real CLI on offline-seeded
-> data — including both DST transitions — and publishes the [dbt docs
-> site](https://micha-js.github.io/energy-platform/). The optimizer, forecasting, and the
+> **Status: M5 — economics.** A typed tariff engine (static, dynamic day-ahead, feed-in) prices the
+> warehouse: `mart_tariff_counterfactuals` answers *"what would this household have paid under
+> tariff X, with and without the battery"*, and `mart_solar_economics` reports self-consumption,
+> autarky, and avoided grid cost against feed-in revenue. Tariff parameters live in **one committed
+> CSV** that dbt seeds and the Python engine reads, and a reconciliation test recomputes every
+> priced hour in Python to prove the SQL and the package agree. CI rebuilds the whole warehouse
+> from the real CLI on offline-seeded data — including both DST transitions — and publishes the
+> [dbt docs site](https://micha-js.github.io/energy-platform/). The optimizer, forecasting, and the
 > dashboard land in later milestones.
 
 ## Architecture
@@ -155,8 +157,9 @@ The [`dbt/`](dbt/) project (dbt-postgres) transforms the raw zone into an analyt
   two connectors writing the same series stay separate truths instead of blending.
 - **Intermediate** — `int_hourly_spine` (a UTC-hour grid) joined to household energy balance and
   price in `int_hourly_energy`; an hour missing in any source stays **null**, never filled.
-- **Marts** — `mart_hourly_energy` (the M5/M6 foundation: energy balance + price for every hour)
-  and `mart_data_quality` (per-source gaps, nulls, and live freshness).
+- **Marts** — `mart_hourly_energy` (energy balance + price for every hour, the foundation M5's
+  economics and M6's optimizer both build on) and `mart_data_quality` (per-source gaps, nulls, and
+  live freshness).
 
 ```bash
 just dbt-deps     # install dbt_utils
@@ -194,6 +197,66 @@ Design decisions worth calling out:
   recorded fixture rather than a pinned literal, so it always describes the payload it carries —
   and ingestion rejects any vintage reaching past the horizon it claims.
 
+## Economics: tariff engine + counterfactuals (M5)
+
+What the household would have paid. A typed tariff engine in
+[`src/energy_platform/tariffs/`](src/energy_platform/tariffs/) prices energy — **static** (flat
+ct/kWh + monthly Grundpreis), **dynamic** (hourly day-ahead spot + supplier margin + fixed
+pass-through), and **feed-in** (flat statutory compensation per exported kWh) — and two marts turn
+that into monthly answers:
+
+- **`mart_tariff_counterfactuals`** — cost per site per month under {static, dynamic} ×
+  {battery, no battery}, plus feed-in revenue and a net figure.
+- **`mart_solar_economics`** — self-consumption rate, autarky rate, and what a PV kWh was worth,
+  split between grid cost avoided and feed-in revenue.
+
+```bash
+just dbt-build       # seeds the tariff catalogue, builds the economics marts, runs every test
+just dbt-reconcile   # assert the Python engine and the SQL macro compute the same money
+```
+
+Design decisions worth calling out:
+
+- **One CSV, two readers — parameters cannot drift.** M6's optimizer needs tariff logic in Python
+  (it evaluates cost inside an LP objective and cannot call SQL per candidate dispatch); the marts
+  need cost columns in SQL. Rather than render one from the other,
+  [`dbt/seeds/tariffs.csv`](dbt/seeds/tariffs.csv) is the **only** place any rate is written down:
+  dbt loads it as a seed, and `energy_platform.tariffs.catalog` reads the same file. There is no
+  generated artefact, so there is no staleness bug class.
+- **Arithmetic is written twice, and pinned by a test.** Two runtimes means two implementations —
+  that part is unavoidable. `tests/dbt/test_tariff_reconciliation.py` recomputes **every priced
+  hour** the warehouse built with the Python engine and asserts equality, so a factor-of-ten unit
+  slip, VAT applied on one side only, or a sign error fails CI naming the hour and tariff that
+  diverged. It is the guard, not the documentation, that keeps the two honest.
+- **EUR/MWh → ct/kWh is a factor of ten.** The warehouse stores wholesale price in EUR/MWh; retail
+  tariffs are quoted in ct/kWh. A `/1000` is silent — the numbers stay plausible, just an order of
+  magnitude too small — so the conversion is a named constant on both sides and asserted explicitly
+  by a dbt unit test *and* the reconciliation.
+- **`greatest(NULL, 0)` returns 0 in Postgres.** The no-battery counterfactual is
+  `import = max(load − pv, 0)`, and the obvious one-liner turns a gapped hour into a fabricated
+  zero-import hour — "we don't know" quietly becoming "it cost nothing". Every derived flow carries
+  an explicit null guard, with a named regression test that fails against the naive form.
+- **Negative prices are in contract, and the two sides of the meter differ.** Day-ahead prices go
+  negative and nothing clamps them: a dynamic import price below zero means the household is paid to
+  consume. Feed-in is a flat statutory rate that does *not* track the market, so a negative hour
+  still earns full compensation — computing it as `spot × export` would be a sign bug that a
+  negative hour makes expensive. Both directions are unit-tested.
+- **Money is exact decimal, cast to float at the boundary.** Computed in floating point, the price
+  stack returns 13.316099999999997 where 13.3161 was meant, and that noise accumulates through every
+  monthly sum. The arithmetic runs in `numeric`; the column type stays `double precision`.
+- **Partial months are flagged, never presented as whole ones.** The demo seeds two week-long
+  windows, so *no* month in the warehouse is complete. Every monthly row carries `expected_hours`
+  (the DST-correct calendar length — 743 in March, 745 in October, derived from the calendar and
+  never counted from the rows under test), `covered_hours`, `priced_hours`, `completeness_ratio`,
+  and `is_partial_month`. The Grundpreis is pro-rated to match, with the full monthly fee kept
+  alongside so that can be undone.
+- **The demo's battery looks worse than the hardware is, and the mart says so.** The M3 generator
+  simulates each Berlin day independently — that is what makes it a pure function of
+  `(config, date)` — so state of charge resets at midnight and stored energy is discarded. Over the
+  seeded March window the battery charges 54 kWh and discharges 13. Rather than quietly present a
+  misleading comparison, both marts expose `battery_unreturned_kwh`. Carrying SoC across partitions
+  is an M3 change (it rewrites every content hash) and is tracked separately.
+
 ## Engineering invariants
 
 - **Idempotent, re-runnable ingestion** — content-hash verification, safe backfills.
@@ -230,6 +293,7 @@ just demo-down   # stop and drop the Postgres volume
 | `just backfill`  | load market + weather history into the raw zone |
 | `just dbt-seed`  | offline-seed the raw zone (recorded fixtures)  |
 | `just dbt-build` | build dbt models + run all tests               |
+| `just dbt-reconcile` | assert the Python tariff engine matches the SQL |
 | `just dbt-docs`  | generate the dbt docs site                     |
 | `just lock`      | regenerate `uv.lock` after changing deps       |
 
@@ -239,8 +303,9 @@ seed the stack.
 
 CI runs the full quality gate (against a Postgres service container, so the raw-zone
 idempotency tests execute), a `dbt` job that rebuilds and tests the warehouse on offline-seeded
-data, and `docker compose config` validation on every push and PR; the dbt docs site publishes to
-GitHub Pages on merge to main.
+data and then runs the warehouse guards — the no-lookahead manifest check and the Python↔SQL tariff
+reconciliation, both of which hard-fail rather than skip there — and `docker compose config`
+validation on every push and PR; the dbt docs site publishes to GitHub Pages on merge to main.
 
 ## License
 

@@ -120,8 +120,14 @@ jobs:
             || { echo "::error::re-seed was not an all-noop -- ingestion is not idempotent"; exit 1; }
       - name: dbt build (models + all tests, incl. DST singular tests)
         run: uv run --project dbt dbt build --project-dir dbt --profiles-dir dbt
-      - name: No-lookahead guard (manifest exists after build)
-        run: uv run pytest tests/dbt/test_no_lookahead.py
+      - name: Warehouse guards (no-lookahead manifest check + Python<->SQL tariff reconciliation)
+        # Both need a built warehouse, so they run here rather than in `quality`, where they skip.
+        # ENERGY_REQUIRE_DBT turns those skips into failures: a reconciliation that silently did
+        # not run is indistinguishable from one that passed.
+        run: uv run pytest tests/dbt
+        env:
+          ENERGY_REQUIRE_POSTGRES: "1"
+          ENERGY_REQUIRE_DBT: "1"
       - name: dbt docs generate
         run: uv run --project dbt dbt docs generate --project-dir dbt --profiles-dir dbt
       - name: Upload docs as Pages artifact

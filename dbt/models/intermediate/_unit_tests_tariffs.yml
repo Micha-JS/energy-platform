@@ -1,0 +1,180 @@
+version: 2
+
+unit_tests:
+  # The single most important line in M5. Postgres `greatest(NULL, 0)` returns 0, NOT NULL, so the
+  # obvious counterfactual formula `greatest(load - pv, 0)` silently fabricates a zero-import hour
+  # wherever telemetry gapped -- turning "we don't know" into "it cost nothing", which is exactly
+  # the fabrication the raw zone refuses to do. Guarded by an explicit null check on every derived
+  # flow.
+  - name: counterfactual_nulls_propagate_not_greatest_zero
+    model: int_hourly_counterfactual
+    description: >
+      An hour with NULL PV must yield NULL counterfactual flows, not zero. The battery scenario
+      keeps its own metered values, which are unaffected by the missing PV. Fails on a model
+      written as greatest(load - pv, 0), where Postgres returns 0 for both flows and the hour
+      quietly prices as free.
+    given:
+      - input: ref('int_hourly_energy')
+        rows:
+          - {ts_utc: "2024-06-12 10:00:00+00", region: "home", local_ts: "2024-06-12 12:00:00", local_date: "2024-06-12", local_hour: 12, pv_production_kwh: 3.0, household_load_kwh: 1.0, grid_import_kwh: 0.0, grid_export_kwh: 2.0, battery_charge_kwh: 0.0, battery_discharge_kwh: 0.0, price_eur_mwh: 50.0}
+          # PV gapped: nothing about the no-battery counterfactual is knowable for this hour.
+          - {ts_utc: "2024-06-12 11:00:00+00", region: "home", local_ts: "2024-06-12 13:00:00", local_date: "2024-06-12", local_hour: 13, household_load_kwh: 1.0, grid_import_kwh: 0.4, grid_export_kwh: 0.0, battery_charge_kwh: 0.0, battery_discharge_kwh: 0.0, price_eur_mwh: 50.0}
+    expect:
+      rows:
+        - {ts_utc: "2024-06-12 10:00:00+00", scenario: "battery", grid_import_kwh: 0.0, grid_export_kwh: 2.0}
+        - {ts_utc: "2024-06-12 10:00:00+00", scenario: "no_battery", grid_import_kwh: 0.0, grid_export_kwh: 2.0}
+        - {ts_utc: "2024-06-12 11:00:00+00", scenario: "battery", grid_import_kwh: 0.4, grid_export_kwh: 0.0}
+        - {ts_utc: "2024-06-12 11:00:00+00", scenario: "no_battery", grid_import_kwh: null, grid_export_kwh: null}
+
+  # With no storage there is nowhere for energy to hide, so the AC-node identity is exact, not
+  # approximate. Checked on adversarial hours: PV-only, load-only, and exactly balanced.
+  - name: counterfactual_conserves_energy_on_mocked_hours
+    model: int_hourly_counterfactual
+    description: >
+      For the no_battery scenario, pv + import == load + export exactly, and an hour never imports
+      and exports at once. A surplus hour exports the difference and imports nothing; a deficit
+      hour does the reverse; a balanced hour does neither.
+    given:
+      - input: ref('int_hourly_energy')
+        rows:
+          # Surplus: 5 kWh PV against 1 kWh load -> export 4, import 0.
+          - {ts_utc: "2024-06-12 10:00:00+00", region: "home", local_date: "2024-06-12", pv_production_kwh: 5.0, household_load_kwh: 1.0, grid_import_kwh: 0.0, grid_export_kwh: 4.0}
+          # Deficit: no sun -> import the whole load, export nothing.
+          - {ts_utc: "2024-06-12 20:00:00+00", region: "home", local_date: "2024-06-12", pv_production_kwh: 0.0, household_load_kwh: 2.5, grid_import_kwh: 2.5, grid_export_kwh: 0.0}
+          # Exactly balanced: neither flow, and no floating-point residue either side.
+          - {ts_utc: "2024-06-12 08:00:00+00", region: "home", local_date: "2024-06-12", pv_production_kwh: 1.25, household_load_kwh: 1.25, grid_import_kwh: 0.0, grid_export_kwh: 0.0}
+    expect:
+      rows:
+        - {ts_utc: "2024-06-12 10:00:00+00", scenario: "no_battery", grid_import_kwh: 0.0, grid_export_kwh: 4.0, self_consumed_kwh: 1.0}
+        - {ts_utc: "2024-06-12 20:00:00+00", scenario: "no_battery", grid_import_kwh: 2.5, grid_export_kwh: 0.0, self_consumed_kwh: 0.0}
+        - {ts_utc: "2024-06-12 08:00:00+00", scenario: "no_battery", grid_import_kwh: 0.0, grid_export_kwh: 0.0, self_consumed_kwh: 1.25}
+        - {ts_utc: "2024-06-12 10:00:00+00", scenario: "battery", grid_import_kwh: 0.0, grid_export_kwh: 4.0, self_consumed_kwh: 1.0}
+        - {ts_utc: "2024-06-12 20:00:00+00", scenario: "battery", grid_import_kwh: 2.5, grid_export_kwh: 0.0, self_consumed_kwh: 0.0}
+        - {ts_utc: "2024-06-12 08:00:00+00", scenario: "battery", grid_import_kwh: 0.0, grid_export_kwh: 0.0, self_consumed_kwh: 1.25}
+
+  # EUR/MWh -> ct/kWh is a factor of TEN. A /1000 is silent: the numbers stay plausible, just an
+  # order of magnitude too small, and every downstream total is quietly wrong. Pinned with margin,
+  # pass-through and VAT all zeroed so the assertion is the conversion and nothing else.
+  - name: dynamic_price_unit_conversion_is_ct_per_kwh
+    model: int_hourly_tariff_cost
+    description: >
+      100 EUR/MWh must become exactly 10 ct/kWh, so importing 1 kWh costs exactly 0.10 EUR. Fails
+      on a /1000, which yields 0.1 ct/kWh and a cost of 0.001 EUR.
+    given:
+      - input: ref('int_hourly_counterfactual')
+        rows:
+          - {ts_utc: "2024-06-12 10:00:00+00", region: "home", local_date: "2024-06-12", scenario: "battery", grid_import_kwh: 1.0, grid_export_kwh: 0.0, self_consumed_kwh: 0.0, price_eur_mwh: 100.0}
+      - input: ref('tariffs')
+        rows:
+          - {tariff_id: "bare_dynamic", kind: "dynamic", margin_ct_kwh: 0.0, pass_through_ct_kwh: 0.0, base_fee_eur_month: 0.0, vat_rate: 0.0}
+          - {tariff_id: "eeg_2024", kind: "feed_in", price_ct_kwh: 8.11}
+    expect:
+      rows:
+        - {ts_utc: "2024-06-12 10:00:00+00", scenario: "battery", tariff_id: "bare_dynamic", import_price_ct_kwh: 10.0, energy_cost_eur: 0.10}
+
+  # Day-ahead prices go negative, and the two sides of the meter must react differently: the
+  # dynamic import price follows the spot down (and may pass zero -- clamping would be a bug),
+  # while feed-in is a flat statutory rate that does not track the market at all. Computing
+  # feed-in as `spot * export` would turn a negative hour into a phantom charge.
+  - name: negative_spot_prices_sign_correctly
+    model: int_hourly_tariff_cost
+    description: >
+      At -80 EUR/MWh the dynamic import price is (-8 + 1.79 + 17.40) * 1.19 = 13.3161 ct/kWh --
+      still positive here, but arrived at by subtraction, so a sign error shows. The static price
+      is untouched by the spot. Feed-in revenue stays the full flat rate and stays positive under
+      both tariffs. Fails on any model that clamps the spot at zero or prices exports off it.
+    given:
+      - input: ref('int_hourly_counterfactual')
+        rows:
+          - {ts_utc: "2024-06-12 13:00:00+00", region: "home", local_date: "2024-06-12", scenario: "no_battery", grid_import_kwh: 2.0, grid_export_kwh: 5.0, self_consumed_kwh: 0.0, price_eur_mwh: -80.0}
+      - input: ref('tariffs')
+        rows:
+          - {tariff_id: "static_2024", kind: "static", price_ct_kwh: 29.41, base_fee_eur_month: 10.84, vat_rate: 0.19}
+          - {tariff_id: "dynamic_2024", kind: "dynamic", margin_ct_kwh: 1.79, pass_through_ct_kwh: 17.40, base_fee_eur_month: 10.84, vat_rate: 0.19}
+          - {tariff_id: "eeg_2024", kind: "feed_in", price_ct_kwh: 8.11}
+    expect:
+      rows:
+        - {ts_utc: "2024-06-12 13:00:00+00", tariff_id: "dynamic_2024", import_price_ct_kwh: 13.3161, energy_cost_eur: 0.266322, feed_in_revenue_eur: 0.4055}
+        - {ts_utc: "2024-06-12 13:00:00+00", tariff_id: "static_2024", import_price_ct_kwh: 34.9979, energy_cost_eur: 0.699958, feed_in_revenue_eur: 0.4055}
+
+  # A spot price so negative that the whole stack goes below zero: the household is genuinely paid
+  # to consume. The arithmetic must follow rather than floor at zero -- this is the case a
+  # "costs can't be negative" clamp would silently destroy, and the case a dynamic tariff exists
+  # to exploit.
+  - name: deeply_negative_spot_makes_import_cost_negative
+    model: int_hourly_tariff_cost
+    description: >
+      At -300 EUR/MWh (-30 ct/kWh) against 10 ct/kWh of pass-through, the dynamic price is
+      -20 ct/kWh, so importing 2 kWh EARNS 0.40 EUR. Fails on any greatest(..., 0) clamp on the
+      price or the cost. Round tariff values and zero VAT deliberately: dbt unit tests compare
+      floats exactly, and the point here is the sign, not the VAT stack -- which
+      negative_spot_prices_sign_correctly asserts on the real catalogue values instead.
+    given:
+      - input: ref('int_hourly_counterfactual')
+        rows:
+          - {ts_utc: "2024-06-12 14:00:00+00", region: "home", local_date: "2024-06-12", scenario: "no_battery", grid_import_kwh: 2.0, grid_export_kwh: 1.0, self_consumed_kwh: 0.0, price_eur_mwh: -300.0}
+      - input: ref('tariffs')
+        rows:
+          - {tariff_id: "bare_dynamic", kind: "dynamic", margin_ct_kwh: 0.0, pass_through_ct_kwh: 10.0, base_fee_eur_month: 0.0, vat_rate: 0.0}
+          - {tariff_id: "eeg_2024", kind: "feed_in", price_ct_kwh: 8.11}
+    expect:
+      rows:
+        - {ts_utc: "2024-06-12 14:00:00+00", tariff_id: "bare_dynamic", import_price_ct_kwh: -20.0, energy_cost_eur: -0.40}
+
+  # The grain guard, mirroring price_join_does_not_fan_out_across_regions in the energy models: the
+  # catalogue is cross-joined, so an unfiltered feed-in join would multiply every hour by the
+  # number of compensation schemes, and a stray non-consumption row would price exports as imports.
+  - name: tariff_join_does_not_fan_out
+    model: int_hourly_tariff_cost
+    description: >
+      One hour x two consumption tariffs is exactly two rows, even with a second feed_in scheme in
+      the catalogue: feed-in is selected by the feed_in_tariff_id var, not joined. Fails on a model
+      that joins every feed_in row (four rows) or that lets feed_in rows into the consumption side
+      (six rows).
+    overrides:
+      vars:
+        feed_in_tariff_id: "eeg_2024"
+    given:
+      - input: ref('int_hourly_counterfactual')
+        rows:
+          - {ts_utc: "2024-06-12 10:00:00+00", region: "home", local_date: "2024-06-12", scenario: "battery", grid_import_kwh: 1.0, grid_export_kwh: 1.0, self_consumed_kwh: 0.5, price_eur_mwh: 100.0}
+      - input: ref('tariffs')
+        rows:
+          - {tariff_id: "static_2024", kind: "static", price_ct_kwh: 29.41, base_fee_eur_month: 10.84, vat_rate: 0.19}
+          - {tariff_id: "dynamic_2024", kind: "dynamic", margin_ct_kwh: 1.79, pass_through_ct_kwh: 17.40, base_fee_eur_month: 10.84, vat_rate: 0.19}
+          - {tariff_id: "eeg_2024", kind: "feed_in", price_ct_kwh: 8.11}
+          # A second scheme -- EEG rates are set by commissioning date, so this is realistic.
+          - {tariff_id: "eeg_2025", kind: "feed_in", price_ct_kwh: 7.86}
+    expect:
+      rows:
+        - {ts_utc: "2024-06-12 10:00:00+00", tariff_id: "static_2024", feed_in_price_ct_kwh: 8.11}
+        - {ts_utc: "2024-06-12 10:00:00+00", tariff_id: "dynamic_2024", feed_in_price_ct_kwh: 8.11}
+
+  # An hour missing any term must not price as free. is_priced is what the marts aggregate on, so a
+  # false positive here becomes a silently understated monthly cost.
+  - name: unpriced_hours_are_marked_not_zeroed
+    model: int_hourly_tariff_cost
+    description: >
+      An hour with no spot price is unpriced under a dynamic tariff (no price exists) but priced
+      under a static one (the spot is irrelevant to it); an hour with no import is unpriced under
+      both. Fails on a model that coalesces a missing term to zero.
+    given:
+      - input: ref('int_hourly_counterfactual')
+        rows:
+          # No spot price for this hour.
+          - {ts_utc: "2024-06-12 10:00:00+00", region: "home", local_date: "2024-06-12", scenario: "battery", grid_import_kwh: 1.0, grid_export_kwh: 0.0, self_consumed_kwh: 0.5}
+          # Telemetry gapped: no flows at all.
+          - {ts_utc: "2024-06-12 11:00:00+00", region: "home", local_date: "2024-06-12", scenario: "battery", price_eur_mwh: 100.0}
+      - input: ref('tariffs')
+        rows:
+          - {tariff_id: "static_2024", kind: "static", price_ct_kwh: 29.41, base_fee_eur_month: 10.84, vat_rate: 0.19}
+          - {tariff_id: "dynamic_2024", kind: "dynamic", margin_ct_kwh: 1.79, pass_through_ct_kwh: 17.40, base_fee_eur_month: 10.84, vat_rate: 0.19}
+          - {tariff_id: "eeg_2024", kind: "feed_in", price_ct_kwh: 8.11}
+    expect:
+      rows:
+        # No spot: the dynamic tariff has no price for the hour, the static one is unaffected.
+        - {ts_utc: "2024-06-12 10:00:00+00", tariff_id: "dynamic_2024", import_price_ct_kwh: null, energy_cost_eur: null, is_priced: false}
+        - {ts_utc: "2024-06-12 10:00:00+00", tariff_id: "static_2024", import_price_ct_kwh: 34.9979, energy_cost_eur: 0.349979, is_priced: true}
+        # Telemetry gapped: a price exists but there is no energy to apply it to.
+        - {ts_utc: "2024-06-12 11:00:00+00", tariff_id: "dynamic_2024", import_price_ct_kwh: 34.7361, energy_cost_eur: null, is_priced: false}
+        - {ts_utc: "2024-06-12 11:00:00+00", tariff_id: "static_2024", import_price_ct_kwh: 34.9979, energy_cost_eur: null, is_priced: false}

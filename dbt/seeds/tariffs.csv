@@ -1,0 +1,4 @@
+tariff_id,label,kind,price_ct_kwh,margin_ct_kwh,pass_through_ct_kwh,base_fee_eur_month,vat_rate
+static_2024,Static household tariff (2024),static,29.41,,,10.84,0.19
+dynamic_2024,Dynamic day-ahead tariff (2024),dynamic,,1.79,17.40,10.84,0.19
+eeg_2024,EEG feed-in for surplus on systems <=10 kWp (2024),feed_in,8.11,,,,0.00

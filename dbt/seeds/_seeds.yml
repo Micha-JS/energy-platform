@@ -1,0 +1,56 @@
+version: 2
+
+seeds:
+  - name: tariffs
+    description: >
+      The tariff catalogue -- the single source of truth for tariff parameters, and the only place
+      in the repo any rate is written down. dbt loads it as a seed; the Python tariff engine
+      (src/energy_platform/tariffs/catalog.py) reads the same CSV directly, so the SQL marts and
+      the optimiser's objective cannot disagree about a number. One row per tariff; kind selects
+      which columns apply. Every per-kWh value is NET of VAT -- vat_rate is applied exactly once,
+      downstream. Grain: (tariff_id).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [tariff_id]
+    columns:
+      - name: tariff_id
+        description: Stable id; referenced by the feed_in_tariff_id var and ENERGY_TARIFF_ID.
+        tests: [not_null, unique]
+      - name: label
+        description: Human-readable name, including the vintage the rates are taken from.
+        tests: [not_null]
+      - name: kind
+        description: >
+          static = flat retail energy price; dynamic = hourly day-ahead spot + margin +
+          pass-through; feed_in = flat compensation per exported kWh, outside VAT.
+        tests:
+          - not_null
+          - accepted_values: {values: ["static", "dynamic", "feed_in"]}
+      - name: price_ct_kwh
+        description: >
+          The flat per-kWh rate the row declares, net: the retail energy price for a static
+          tariff, the compensation rate for a feed_in row. NULL for dynamic, whose per-kWh rate is
+          derived from the spot price.
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 200, config: {where: "price_ct_kwh is not null"}}
+      - name: margin_ct_kwh
+        description: Supplier margin on a dynamic tariff, net. NULL for other kinds.
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 50, config: {where: "margin_ct_kwh is not null"}}
+      - name: pass_through_ct_kwh
+        description: >
+          Fixed per-kWh components on a dynamic tariff (grid fees, levies, electricity tax,
+          concession fee), net. NULL for other kinds.
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 100, config: {where: "pass_through_ct_kwh is not null"}}
+      - name: base_fee_eur_month
+        description: >
+          Monthly standing charge (Grundpreis) in EUR, net. Pro-rated by coverage in the monthly
+          marts. NULL for feed_in rows, which have no standing charge.
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 100, config: {where: "base_fee_eur_month is not null"}}
+      - name: vat_rate
+        description: Fraction, not a percentage -- 19% is 0.19. Zero on feed_in rows.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 1}

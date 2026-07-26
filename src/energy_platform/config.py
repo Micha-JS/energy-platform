@@ -40,6 +40,12 @@ DEFAULT_PV_PERFORMANCE_RATIO = 0.82
 DEFAULT_PV_TEMP_COEFF_PER_C = -0.004
 DEFAULT_BATTERY_CAPACITY_KWH = 14.0
 
+# Which rows of the tariff catalogue (dbt/seeds/tariffs.csv) are in force. Only *ids* live here
+# -- the rates themselves live in the catalogue, which dbt seeds and the Python engine reads, so
+# there is exactly one copy of every number. These ids must match the dbt vars of the same name.
+DEFAULT_CONSUMPTION_TARIFF_ID = "static_2024"
+DEFAULT_FEED_IN_TARIFF_ID = "eeg_2024"
+
 
 def _env(*names: str, default: str) -> str:
     """Return the first *set* environment variable among ``names``, else ``default``.
@@ -318,6 +324,31 @@ class SyntheticConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class TariffConfig:
+    """Which tariffs to price with, and where the catalogue lives.
+
+    Deliberately holds no prices: every tariff *parameter* lives in the committed catalogue CSV
+    that dbt also seeds (see :mod:`energy_platform.tariffs.catalog`), so a rate can never differ
+    between the Python engine and the SQL marts. This config only selects rows from it, and the
+    ids must match the dbt vars of the same names (``consumption_tariff_id`` corresponds to the
+    tariffs the counterfactual mart prices; ``feed_in_tariff_id`` to the one it compensates
+    exports with).
+    """
+
+    catalog_path: str = ""
+    consumption_tariff_id: str = DEFAULT_CONSUMPTION_TARIFF_ID
+    feed_in_tariff_id: str = DEFAULT_FEED_IN_TARIFF_ID
+
+    @classmethod
+    def from_env(cls) -> TariffConfig:
+        return cls(
+            catalog_path=_env("ENERGY_TARIFF_CATALOG", default=""),
+            consumption_tariff_id=_env("ENERGY_TARIFF_ID", default=DEFAULT_CONSUMPTION_TARIFF_ID),
+            feed_in_tariff_id=_env("ENERGY_FEED_IN_TARIFF_ID", default=DEFAULT_FEED_IN_TARIFF_ID),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class HomeAssistantConfig:
     """The real-telemetry connector's settings -- disabled by default.
 
@@ -361,6 +392,7 @@ class AppConfig:
     pv: PvSystemConfig
     battery: BatteryConfig
     synthetic: SyntheticConfig
+    tariffs: TariffConfig
     home_assistant: HomeAssistantConfig
 
     @classmethod
@@ -373,5 +405,6 @@ class AppConfig:
             pv=PvSystemConfig.from_env(),
             battery=BatteryConfig.from_env(),
             synthetic=SyntheticConfig.from_env(),
+            tariffs=TariffConfig.from_env(),
             home_assistant=HomeAssistantConfig.from_env(),
         )

@@ -29,3 +29,67 @@ models:
       - name: price_eur_mwh
         tests:
           - dbt_utils.accepted_range: {min_value: -500, max_value: 4000, config: {where: "price_eur_mwh is not null"}}
+
+  - name: int_hourly_counterfactual
+    description: >
+      Hourly grid flows under each battery scenario: 'battery' is the metered truth, 'no_battery'
+      is derived from PV and load alone (import = max(load - pv, 0), export = max(pv - load, 0)).
+      Energy is in kWh and gaps stay NULL -- the derived flows carry an explicit null guard because
+      Postgres greatest(NULL, 0) returns 0, which would fabricate a zero-import hour.
+      Grain: (ts_utc, region, scenario).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ts_utc, region, scenario]
+    columns:
+      - name: ts_utc
+        tests: [not_null]
+      - name: region
+        tests: [not_null]
+      - name: scenario
+        tests:
+          - not_null
+          - accepted_values: {values: ["battery", "no_battery"]}
+      - name: grid_import_kwh
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "grid_import_kwh is not null"}}
+      - name: grid_export_kwh
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "grid_export_kwh is not null"}}
+      - name: self_consumed_kwh
+        description: PV consumed on site (pv - export), accounted at the meter.
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "self_consumed_kwh is not null"}}
+
+  - name: int_hourly_tariff_cost
+    description: >
+      Hourly cost and feed-in revenue (EUR) for each scenario under each consumption tariff, from
+      the tariffs seed. import_price_ct_kwh is gross of VAT and may go negative under a dynamic
+      tariff; feed-in is a flat rate independent of the spot price. is_priced marks the hours where
+      every term is present -- the marts aggregate only those. Grain: (ts_utc, region, scenario,
+      tariff_id). Pinned to the Python engine by tests/dbt/test_tariff_reconciliation.py.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ts_utc, region, scenario, tariff_id]
+    columns:
+      - name: ts_utc
+        tests: [not_null]
+      - name: tariff_id
+        tests: [not_null]
+      - name: tariff_kind
+        tests:
+          - accepted_values: {values: ["static", "dynamic"]}
+      - name: is_priced
+        tests: [not_null]
+      - name: import_price_ct_kwh
+        description: >
+          Gross retail price of an imported kWh. The lower bound allows the negative prices a
+          dynamic tariff inherits from a negative day-ahead hour -- clamping would be a bug.
+        tests:
+          - dbt_utils.accepted_range: {min_value: -100, max_value: 500, config: {where: "import_price_ct_kwh is not null"}}
+      - name: feed_in_price_ct_kwh
+        description: Flat statutory compensation; never tracks the spot price, so never negative.
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 100, config: {where: "feed_in_price_ct_kwh is not null"}}
+      - name: feed_in_revenue_eur
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "feed_in_revenue_eur is not null"}}
