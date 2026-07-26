@@ -13,10 +13,14 @@ Run with: ``uv run python scripts/record_smard_fixtures.py``
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import httpx
+
+# The two M4 CI windows plus a normal reference day are the shared fixture contract; endpoints
+# suffice for SMARD's weekly files (both DST Sundays fall inside their window).
+from _fixture_windows import MARCH_WINDOW, NORMAL_DAY, OCTOBER_WINDOW, expand_days
 
 from energy_platform.connectors.smard import SmardClient
 from energy_platform.connectors.types import Resolution
@@ -26,24 +30,7 @@ BASE_URL = "https://www.smard.de/app/chart_data"
 REGION = "DE"
 FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "connectors" / "fixtures"
 
-# The two M4 CI windows (inclusive Berlin days) plus a normal reference day. Endpoints suffice for
-# SMARD's weekly files; both DST Sundays fall inside their window.
-NORMAL_DAY = date(2024, 6, 12)
-MARCH_WINDOW = (date(2024, 3, 28), date(2024, 4, 3))
-OCTOBER_WINDOW = (date(2024, 10, 24), date(2024, 10, 30))
-
-
-def _days(*spans: tuple[date, date]) -> list[date]:
-    out: list[date] = []
-    for start, end in spans:
-        day = start
-        while day <= end:
-            out.append(day)
-            day += timedelta(days=1)
-    return out
-
-
-_WINDOW_DAYS = [NORMAL_DAY, *_days(MARCH_WINDOW, OCTOBER_WINDOW)]
+_WINDOW_DAYS = [NORMAL_DAY, *expand_days(MARCH_WINDOW, OCTOBER_WINDOW)]
 
 # (filter_id, resolution, representative days to cover). Hourly spans both full windows; the
 # quarter-hour series only needs the DST Sundays the unit tests assert on.

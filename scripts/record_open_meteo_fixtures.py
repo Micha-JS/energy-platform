@@ -11,10 +11,14 @@ Run with: ``uv run python scripts/record_open_meteo_fixtures.py``
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import httpx
+
+# The archive is requested one Berlin-day window at a time, so every day the M4 CI backfill loads
+# needs its own recorded window: the DST windows and reference day are the shared fixture contract.
+from _fixture_windows import MARCH_WINDOW, NORMAL_DAY, OCTOBER_WINDOW, expand_days
 
 # The private helpers are imported deliberately (as the SMARD recorder reuses
 # ``SmardClient._weeks_covering``) so fixtures stay consistent with the client's requests.
@@ -31,25 +35,7 @@ from energy_platform.orchestration.ingest import berlin_day_window
 COORDS = (52.52, 13.40)  # rounded site coordinates -- the only ones in the repo
 FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "connectors" / "fixtures"
 
-# The archive is requested one Berlin-day window at a time, so every day the M4 CI backfill loads
-# needs its own recorded window. Cover a normal reference day plus the two ~week-long windows
-# straddling the 2024 DST-transition Sundays.
-NORMAL_DAY = date(2024, 6, 12)
-MARCH_WINDOW = (date(2024, 3, 28), date(2024, 4, 3))
-OCTOBER_WINDOW = (date(2024, 10, 24), date(2024, 10, 30))
-
-
-def _span_days(*spans: tuple[date, date]) -> list[date]:
-    out: list[date] = []
-    for start, end in spans:
-        day = start
-        while day <= end:
-            out.append(day)
-            day += timedelta(days=1)
-    return out
-
-
-DAYS: list[date] = [NORMAL_DAY, *_span_days(MARCH_WINDOW, OCTOBER_WINDOW)]
+DAYS: list[date] = [NORMAL_DAY, *expand_days(MARCH_WINDOW, OCTOBER_WINDOW)]
 FORECAST_DAYS = 7
 PAST_DAYS = 1
 

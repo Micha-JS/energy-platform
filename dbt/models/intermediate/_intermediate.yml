@@ -3,18 +3,26 @@ version: 2
 models:
   - name: int_hourly_spine
     description: >
-      Canonical UTC-hour grid over the declared coverage windows. Exactly one row per UTC hour;
-      DST-correct (23h / 25h transition days).
+      Canonical UTC-hour grid over the declared coverage windows, crossed with the sites in staged
+      telemetry. Exactly one row per (UTC hour, site); DST-correct (23h / 25h transition days).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ts_utc, region]
     columns:
       - name: ts_utc
-        tests: [not_null, unique]
+        tests: [not_null]
+      - name: region
+        tests: [not_null]
 
   - name: int_hourly_energy
     description: >
-      Hourly energy balance joined with price on the spine; gaps stay NULL. Grain: ts_utc.
+      Hourly energy balance joined with price on the spine; gaps stay NULL. Grain: (ts_utc, region).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ts_utc, region]
     columns:
       - name: ts_utc
-        tests: [not_null, unique]
+        tests: [not_null]
       - name: soc_frac
         tests:
           - dbt_utils.accepted_range: {min_value: 0, max_value: 1, config: {where: "soc_frac is not null"}}

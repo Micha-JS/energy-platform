@@ -4,10 +4,13 @@ models:
   - name: mart_hourly_energy
     description: >
       Energy balance and price for every hour in declared coverage, UTC + Europe/Berlin calendar,
-      NULL where any source has a gap. The M5/M6 foundation. Grain: ts_utc.
+      NULL where any source has a gap. The M5/M6 foundation. Grain: (ts_utc, region).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ts_utc, region]
     columns:
       - name: ts_utc
-        tests: [not_null, unique]
+        tests: [not_null]
       - name: local_date
         tests: [not_null]
       - name: soc_frac

@@ -28,4 +28,8 @@ from {{ ref('int_hourly_spine') }} s
 left join {{ ref('stg_telemetry') }} t
     on t.ts_utc = s.ts_utc and t.region = s.region
 left join {{ ref('stg_prices') }} p
-    on p.ts_utc = s.ts_utc and p.resolution = 'hour'
+    on p.ts_utc = s.ts_utc
+    and p.resolution = 'hour'
+    -- Attach the national day-ahead price by explicit bidding zone, never by omission: without a
+    -- region predicate a second ingested price region would fan out and double every spine row.
+    and p.region = '{{ var("price_region", "DE") }}'
