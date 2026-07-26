@@ -62,6 +62,12 @@ dbt-seed:
 dbt-build:
     uv run --project dbt dbt build --project-dir dbt --profiles-dir dbt
 
+# Assert the Python tariff engine and the dbt tariff macro compute the same money, hour by hour,
+# over the built warehouse -- plus the no-lookahead manifest guard. Needs `just dbt-build` first;
+# ENERGY_REQUIRE_DBT makes a missing warehouse a failure rather than a skip, as CI does.
+dbt-reconcile:
+    ENERGY_REQUIRE_DBT=1 uv run pytest tests/dbt
+
 # Generate the dbt docs site into dbt/target (index.html + manifest + catalog).
 dbt-docs:
     uv run --project dbt dbt docs generate --project-dir dbt --profiles-dir dbt

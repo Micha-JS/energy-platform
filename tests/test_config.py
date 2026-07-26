@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from energy_platform.config import (
@@ -12,7 +14,9 @@ from energy_platform.config import (
     PvSystemConfig,
     SiteConfig,
     SmardConfig,
+    TariffConfig,
 )
+from energy_platform.tariffs.catalog import load_catalog
 
 
 def test_defaults_need_no_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -70,6 +74,29 @@ def test_system_defaults_match_the_fenecon(monkeypatch: pytest.MonkeyPatch) -> N
     assert 0.0 < battery.round_trip_efficiency <= 1.0
     # AC cap is a distinct inverter property, not the DC nameplate.
     assert PvSystemConfig.from_env().ac_cap_kw != PvSystemConfig.from_env().dc_kwp
+
+
+def test_tariff_defaults_name_catalogue_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    for var in ("ENERGY_TARIFF_CATALOG", "ENERGY_TARIFF_ID", "ENERGY_FEED_IN_TARIFF_ID"):
+        monkeypatch.delenv(var, raising=False)
+    config = TariffConfig.from_env()
+    assert config.catalog_path == ""  # unset: the committed seed is used
+    # Ids, never rates -- every rate lives in the catalogue the dbt seed and the engine share.
+    catalog = load_catalog()
+    assert config.consumption_tariff_id in catalog
+    assert config.feed_in_tariff_id in catalog
+
+
+def test_tariff_ids_are_overridable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENERGY_TARIFF_ID", "dynamic_2024")
+    assert TariffConfig.from_env().consumption_tariff_id == "dynamic_2024"
+
+
+def test_tariff_feed_in_default_matches_the_dbt_var() -> None:
+    """The dbt var feed_in_tariff_id and this default must name the same scheme, or the SQL marts
+    and the Python engine would compensate exports at different rates."""
+    project = (Path(__file__).resolve().parents[1] / "dbt" / "dbt_project.yml").read_text()
+    assert f'feed_in_tariff_id: "{TariffConfig.from_env().feed_in_tariff_id}"' in project
 
 
 def test_home_assistant_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:

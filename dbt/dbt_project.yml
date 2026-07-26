@@ -31,6 +31,25 @@ models:
       +materialized: table
       +schema: marts
 
+seeds:
+  energy_platform:
+    +schema: seeds
+    tariffs:
+      # Types are declared, never inferred: a tariff rate silently landing as text would still
+      # multiply (Postgres would cast) right up until a NULL or a locale-formatted value made it
+      # fail somewhere far from here. This seed is also read verbatim by the Python tariff engine
+      # (src/energy_platform/tariffs/catalog.py) -- one file, two readers, so the rates cannot
+      # drift between the SQL marts and the optimiser's objective.
+      +column_types:
+        tariff_id: varchar
+        label: varchar
+        kind: varchar
+        price_ct_kwh: numeric
+        margin_ct_kwh: numeric
+        pass_through_ct_kwh: numeric
+        base_fee_eur_month: numeric
+        vat_rate: numeric
+
 vars:
   # Declared coverage windows (Europe/Berlin, inclusive). The hourly spine is generated from
   # these ranges -- NOT inferred from min/max of the data -- so the two disjoint seeded windows
@@ -51,6 +70,14 @@ vars:
   # same bidding zone at the same instant, and the price join must attach exactly one of them.
   # 'smard' is the only connector that ingests prices today.
   price_source: "smard"
+
+  # Which feed-in compensation scheme is in force. Unlike `telemetry_source`, a default IS safe
+  # here: the catalogue ships exactly one feed_in row, and pricing exports at the wrong statutory
+  # rate is a visible arithmetic error rather than a silent data swap. It is a var rather than a
+  # hardcoded id because EEG rates are set by commissioning date, so a second system -- or a
+  # second year -- means a second row. Mirrors ENERGY_FEED_IN_TARIFF_ID on the Python side.
+  #   dbt build --vars '{feed_in_tariff_id: eeg_2025}'
+  feed_in_tariff_id: "eeg_2024"
 
   # `telemetry_source` selects which connector the energy models read when more than one writes the
   # same site (the synthetic demo generator and the real Fenecon reader both default to

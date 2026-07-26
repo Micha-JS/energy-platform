@@ -26,6 +26,108 @@ models:
         tests:
           - dbt_utils.accepted_range: {min_value: 0, config: {where: "household_load_kwh is not null"}}
 
+  - name: mart_tariff_counterfactuals
+    description: >
+      What the household would have paid per month under each tariff, with and without the
+      battery. Money in EUR, energy in kWh. Coverage is part of the answer: no month in the seeded
+      demo is complete, so every row carries expected_hours (DST-correct calendar length),
+      covered_hours (declared coverage), priced_hours, gap_hours, completeness_ratio, and
+      is_partial_month. The base fee is pro-rated by completeness; base_fee_eur_month keeps the
+      full figure so that can be undone. Check battery_unreturned_kwh before comparing scenarios --
+      the synthetic generator resets state of charge nightly, which charges the battery scenario
+      for energy it never returns. Grain: (local_month, region, scenario, tariff_id).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [local_month, region, scenario, tariff_id]
+    columns:
+      - name: local_month
+        description: First day of the Europe/Berlin calendar month.
+        tests: [not_null]
+      - name: region
+        tests: [not_null]
+      - name: scenario
+        tests:
+          - not_null
+          - accepted_values: {values: ["battery", "no_battery"]}
+      - name: tariff_id
+        tests: [not_null]
+      - name: total_cost_eur
+        description: energy_cost_eur + the pro-rated base fee, gross of VAT.
+      - name: net_cost_eur
+        description: total_cost_eur - feed_in_revenue_eur; negative means the month earned money.
+      - name: battery_unreturned_kwh
+        description: >
+          Charged but not discharged within the period. A few percent of charge is honest
+          round-trip loss; a large value is the synthetic generator's midnight SoC reset, which
+          makes the battery scenario carry cost without benefit. NULL for no_battery.
+      - name: feed_in_revenue_eur
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "feed_in_revenue_eur is not null"}}
+      - name: expected_hours
+        description: Hours in the calendar month, from the Berlin calendar -- 743 in March, 745 in October.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 672, max_value: 745}
+      - name: priced_hours
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0}
+      - name: completeness_ratio
+        description: priced_hours / expected_hours. Below 1 means the month is partly seeded.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 1}
+      - name: is_partial_month
+        tests: [not_null]
+
+  - name: mart_solar_economics
+    description: >
+      What the sun earned: self-consumption and autarky rates, and the value of a PV kWh split
+      between grid cost avoided and feed-in revenue. Keeping the scenario dimension is the point --
+      the difference between battery and no_battery is what the battery does. Rates are computed
+      over the same priced-hour population as their denominator and are NULL where the denominator
+      is zero. Grain: (local_month, region, scenario, tariff_id).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [local_month, region, scenario, tariff_id]
+    columns:
+      - name: local_month
+        tests: [not_null]
+      - name: scenario
+        tests:
+          - not_null
+          - accepted_values: {values: ["battery", "no_battery"]}
+      - name: tariff_id
+        tests: [not_null]
+      - name: self_consumed_kwh
+        description: >
+          Load served without the grid (load - import) -- the shared numerator of both rates, and
+          exactly the import that avoided_grid_cost_eur prices.
+      - name: self_consumption_rate
+        description: self_consumed_kwh / pv_production_kwh. NULL for a month with no generation.
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 1, config: {where: "self_consumption_rate is not null"}}
+      - name: autarky_rate
+        description: self_consumed_kwh / household_load_kwh. NULL for a month with no load.
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 1, config: {where: "autarky_rate is not null"}}
+      - name: battery_unreturned_kwh
+        description: >
+          Charged but not discharged within the period. Round-trip losses account for a few percent
+          legitimately; a large value means the synthetic generator's midnight SoC reset discarded
+          stored energy, which makes the battery scenario look worse than the hardware is. NULL for
+          no_battery. Read this before comparing scenarios.
+      - name: avoided_grid_cost_eur
+        description: >
+          Self-consumed kWh valued at the import price of the hour they were consumed in -- summed
+          hourly, never derived from a monthly average price (which a dynamic tariff would break).
+      - name: completeness_ratio
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 1}
+      - name: is_partial_month
+        tests: [not_null]
+
   - name: mart_data_quality
     description: >
       Per-source coverage gaps, nulls, and freshness. One row per (source, dataset, region,
