@@ -26,10 +26,16 @@ select
 
 from {{ ref('int_hourly_spine') }} s
 left join {{ ref('stg_telemetry') }} t
-    on t.ts_utc = s.ts_utc and t.region = s.region
+    on t.ts_utc = s.ts_utc
+    and t.region = s.region
+    -- One connector per site: two sources reporting the same site would otherwise double every
+    -- spine row. See the telemetry_source_predicate macro for why the default is "no filter".
+    and {{ telemetry_source_predicate('t') }}
 left join {{ ref('stg_prices') }} p
     on p.ts_utc = s.ts_utc
     and p.resolution = 'hour'
-    -- Attach the national day-ahead price by explicit bidding zone, never by omission: without a
-    -- region predicate a second ingested price region would fan out and double every spine row.
+    -- Attach the national day-ahead price by explicit bidding zone and provider, never by
+    -- omission: without these predicates a second ingested price region -- or a second market
+    -- connector (ENTSO-E) publishing the same zone -- would fan out and double every spine row.
     and p.region = '{{ var("price_region", "DE") }}'
+    and p.source = '{{ var("price_source", "smard") }}'

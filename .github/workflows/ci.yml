@@ -100,14 +100,17 @@ jobs:
         run: uv sync --frozen --project dbt
       - name: dbt deps
         run: uv run --project dbt dbt deps --project-dir dbt --profiles-dir dbt
-      - name: Seed raw zone offline (both DST windows + forecast vintages)
+      - name: Seed raw zone offline (both DST windows + a forecast vintage)
         run: |
           uv run energy-platform backfill --offline \
             --from 2024-03-28 --to 2024-04-03 --datasets price,load,weather,telemetry
           uv run energy-platform backfill --offline \
             --from 2024-10-24 --to 2024-10-30 --datasets price,load,weather,telemetry
-          uv run energy-platform forecast-snapshot --offline --issue-date 2024-03-28
-          uv run energy-platform forecast-snapshot --offline --issue-date 2024-03-29
+          # No --issue-date: offline derives it from the recorded fixture, so the vintage
+          # describes the payload it actually carries. One recorded fixture is one honest vintage
+          # (forecasts accrue forward -- a second requires a second recording), so vintage
+          # accrual is asserted by the forecast_vintages_do_not_collapse dbt unit test instead.
+          uv run energy-platform forecast-snapshot --offline
       - name: Assert re-seed is a verifiable no-op (idempotency invariant)
         run: |
           out=$(uv run energy-platform backfill --offline \

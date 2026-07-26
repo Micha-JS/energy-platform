@@ -35,4 +35,10 @@ select
     region,
     {{ berlin_calendar('ts_utc') }}
 from hours
-cross join (select distinct region from {{ ref('stg_telemetry') }}) sites
+cross join (
+    -- Filtered by the same telemetry_source predicate the energy join uses, so a site present
+    -- only in the unselected source cannot manifest a full grid of all-NULL telemetry rows.
+    select distinct t.region
+    from {{ ref('stg_telemetry') }} t
+    where {{ telemetry_source_predicate('t') }}
+) sites

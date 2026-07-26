@@ -50,13 +50,13 @@ dbt-deps:
     uv run --project dbt dbt deps --project-dir dbt --profiles-dir dbt
 
 # Seed the raw zone offline (recorded fixtures, no network) for the two DST windows the dbt
-# layer and its tests are built on, then capture two deterministic forecast vintages. Uses the
-# app CLI (root env), not the dbt env.
+# layer and its tests are built on, then capture the recorded forecast vintage -- whose issue date
+# is derived from the fixture, so it describes the payload it carries. Uses the app CLI (root
+# env), not the dbt env.
 dbt-seed:
     uv run energy-platform backfill --offline --from 2024-03-28 --to 2024-04-03 --datasets price,load,weather,telemetry
     uv run energy-platform backfill --offline --from 2024-10-24 --to 2024-10-30 --datasets price,load,weather,telemetry
-    uv run energy-platform forecast-snapshot --offline --issue-date 2024-03-28
-    uv run energy-platform forecast-snapshot --offline --issue-date 2024-03-29
+    uv run energy-platform forecast-snapshot --offline
 
 # Build all dbt models and run every test (generic, singular DST, freshness-free).
 dbt-build:

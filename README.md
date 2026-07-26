@@ -151,7 +151,8 @@ The [`dbt/`](dbt/) project (dbt-postgres) transforms the raw zone into an analyt
 - **Staging** — one model per source (`stg_prices`, `stg_grid_load`, `stg_weather_actuals`,
   `stg_telemetry`, `stg_weather_forecast`). Reads the latest-wins `observations_current` view,
   renames to typed unit columns, and derives Europe/Berlin calendar columns from the UTC
-  instants — this is the single place DST semantics live.
+  instants — this is the single place DST semantics live. Every staging grain carries `source`, so
+  two connectors writing the same series stay separate truths instead of blending.
 - **Intermediate** — `int_hourly_spine` (a UTC-hour grid) joined to household energy balance and
   price in `int_hourly_energy`; an hour missing in any source stays **null**, never filled.
 - **Marts** — `mart_hourly_energy` (the M5/M6 foundation: energy balance + price for every hour)
@@ -170,10 +171,18 @@ Design decisions worth calling out:
   `ts_utc AT TIME ZONE 'Europe/Berlin'`; the spine is generated in absolute UTC, so the
   spring-forward and fall-back days resolve to **23** and **25** rows — asserted by singular tests
   on 2024-03-31 and 2024-10-27, alongside no-duplicate / no-missing UTC-hour checks. Uniqueness is
-  always keyed on `ts_utc`, never local columns (the fall-back day repeats local 02:00).
+  always keyed on `ts_utc`, never local columns (the fall-back day repeats local 02:00). Those
+  assertions are unconditional: expected hour counts come from the declared coverage windows and
+  the Berlin calendar, never from the rows under test, so a missing day or an empty mart fails
+  rather than passing by silence.
 - **The spine is declared, not inferred.** Coverage windows are a dbt `var`, so the two disjoint
   seeded windows never manifest a phantom void between them — a gap means "missing *within
   declared coverage*".
+- **One connector per site, chosen explicitly.** The synthetic demo generator and the real Fenecon
+  reader can both write the same site; the energy mart is one row per hour per site, so a
+  `telemetry_source` var selects between them. There is no default — a wrong guess would either
+  drop the real house or empty the demo — so with two sources present and no choice made, a named
+  singular test fails and says which var to set.
 - **No lookahead, enforced structurally.** `stg_weather_forecast` is the only model allowed to read
   the forecast vintages, and it carries the `(issue_time, target_time)` dimension forward. A pytest
   over the compiled dbt manifest fails the build if any other model selects from the forecast
@@ -181,7 +190,9 @@ Design decisions worth calling out:
 - **CI rebuilds the warehouse from the real pipeline.** The shipped `energy-platform backfill
   --offline` seeds the raw zone from recorded fixtures (deterministic, zero network) across both
   DST windows, a re-seed proves idempotency on every PR, then `dbt build` runs all tests and the
-  docs site publishes to GitHub Pages.
+  docs site publishes to GitHub Pages. The offline forecast vintage takes its issue date from the
+  recorded fixture rather than a pinned literal, so it always describes the payload it carries —
+  and ingestion rejects any vintage reaching past the horizon it claims.
 
 ## Engineering invariants
 

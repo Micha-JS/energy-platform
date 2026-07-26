@@ -2,11 +2,16 @@ version: 2
 
 models:
   - name: stg_prices
-    description: Day-ahead wholesale price (EUR/MWh); both resolutions. Grain (ts_utc, region, resolution).
+    description: >
+      Day-ahead wholesale price (EUR/MWh); both resolutions. Grain (source, ts_utc, region,
+      resolution) -- `source` is in the grain so a second market connector publishing the same
+      bidding zone is a separate series, never a blend.
     tests:
       - dbt_utils.unique_combination_of_columns:
-          combination_of_columns: [ts_utc, region, resolution]
+          combination_of_columns: [source, ts_utc, region, resolution]
     columns:
+      - name: source
+        tests: [not_null]
       - name: ts_utc
         tests: [not_null]
       - name: region
@@ -23,11 +28,13 @@ models:
                 where: "price_eur_mwh is not null"
 
   - name: stg_grid_load
-    description: Total grid load / Netzlast (MW). Grain (ts_utc, region, resolution).
+    description: Total grid load / Netzlast (MW). Grain (source, ts_utc, region, resolution).
     tests:
       - dbt_utils.unique_combination_of_columns:
-          combination_of_columns: [ts_utc, region, resolution]
+          combination_of_columns: [source, ts_utc, region, resolution]
     columns:
+      - name: source
+        tests: [not_null]
       - name: ts_utc
         tests: [not_null]
       - name: region
@@ -43,11 +50,15 @@ models:
                 where: "load_mw is not null"
 
   - name: stg_weather_actuals
-    description: Open-Meteo weather actuals, one wide row per UTC hour. Grain (ts_utc, region).
+    description: >
+      Open-Meteo weather actuals, one wide row per UTC hour and source.
+      Grain (source, ts_utc, region).
     tests:
       - dbt_utils.unique_combination_of_columns:
-          combination_of_columns: [ts_utc, region]
+          combination_of_columns: [source, ts_utc, region]
     columns:
+      - name: source
+        tests: [not_null]
       - name: ts_utc
         tests: [not_null]
       - name: ghi_w_m2
@@ -70,11 +81,17 @@ models:
           - dbt_utils.accepted_range: {min_value: 0, max_value: 75, config: {where: "wind_speed_m_s is not null"}}
 
   - name: stg_telemetry
-    description: Household telemetry (kWh), one wide row per UTC hour. Grain (ts_utc, region).
+    description: >
+      Household telemetry (kWh), one wide row per UTC hour and source. Grain (source, ts_utc,
+      region): the synthetic demo generator and the real Fenecon reader can both write the same
+      site, and they stay separate series here. Downstream selects one with the `telemetry_source`
+      var -- see assert_single_telemetry_source_per_site.
     tests:
       - dbt_utils.unique_combination_of_columns:
-          combination_of_columns: [ts_utc, region]
+          combination_of_columns: [source, ts_utc, region]
     columns:
+      - name: source
+        tests: [not_null]
       - name: ts_utc
         tests: [not_null]
       - name: soc_frac
@@ -106,8 +123,10 @@ models:
       raw.forecast_observations -- see tests/dbt/test_no_lookahead.py.
     tests:
       - dbt_utils.unique_combination_of_columns:
-          combination_of_columns: [issue_date, issue_time, target_ts_utc, region]
+          combination_of_columns: [source, issue_date, issue_time, target_ts_utc, region]
     columns:
+      - name: source
+        tests: [not_null]
       - name: issue_time
         tests: [not_null]
       - name: issue_date

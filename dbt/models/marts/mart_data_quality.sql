@@ -13,7 +13,10 @@ with latest_ingestion as (
         expected_count,
         fetched_at
     from {{ source('raw', 'ingestion') }}
-    order by source, dataset, region, resolution, partition_date, fetched_at desc
+    -- `id desc` mirrors the observations_current DDL exactly: when a revision lands in the same
+    -- now() tick as the original, fetched_at ties, and a different tiebreak here would count the
+    -- expected_count of one ingestion version against the observations of another -- a phantom gap.
+    order by source, dataset, region, resolution, partition_date, fetched_at desc, id desc
 ),
 
 ingestion_agg as (
