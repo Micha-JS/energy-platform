@@ -15,9 +15,10 @@ Three kinds of feature, and the availability of each is a claim that can be wron
   :func:`~energy_platform.forecasting.vintage.select_vintage`, and checked anyway. "Guaranteed by
   construction" is precisely the kind of claim that stops being true when someone adds a second
   call site.
-* **Lagged actual** -- knowable at ``ts_utc + telemetry_lag_hours``. This is the one that catches
-  real mistakes: on this platform the lag is five days, so the obvious "yesterday's value" feature
-  is lookahead and gets rejected.
+* **Lagged actual** -- knowable once the hour it summarises has closed and the reporting lag has
+  elapsed, which is :func:`~energy_platform.forecasting.vintage.observable_at` and not a local
+  ``ts + lag``. This is the one that catches real mistakes: on this platform the lag is five days,
+  so the obvious "yesterday's value" feature is lookahead and gets rejected.
 
 The counterpart to the rejection tests is a positive control: the honest feature set must build
 cleanly. A checker that rejected everything would pass every "does it catch cheating" test ever
@@ -35,6 +36,7 @@ from typing import Final
 import numpy as np
 
 from energy_platform.connectors.synthetic import BERLIN
+from energy_platform.forecasting.vintage import observable_at
 
 _HOUR_MS: Final = 3_600_000
 
@@ -181,12 +183,18 @@ def vintage_features(
 def lagged_actual_feature(
     name: str, value: float | None, observed_ts_ms: int, lag_hours: int
 ) -> Feature:
-    """An actual from the past, knowable only once the observation lag has elapsed."""
+    """An actual from the past, knowable only once its hour closed and the lag elapsed.
+
+    The instant comes from :func:`~energy_platform.forecasting.vintage.observable_at` rather than
+    from a local ``ts + lag``: the availability a feature *declares* and the availability the
+    baselines *walk back to* have to be the same function, or the check passes on an arithmetic the
+    data was never selected under.
+    """
     return Feature(
         name,
         FeatureKind.LAGGED_ACTUAL,
         value,
-        available_at_ms=observed_ts_ms + lag_hours * _HOUR_MS,
+        available_at_ms=observable_at(observed_ts_ms, lag_hours),
     )
 
 

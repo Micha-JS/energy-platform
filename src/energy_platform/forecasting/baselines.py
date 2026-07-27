@@ -22,15 +22,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Final
 
-from energy_platform.forecasting.vintage import equivalent_hour_ms, is_observable
+from energy_platform.forecasting.vintage import equivalent_hour_ms, is_observable, max_steps
 
 # Stride of each baseline, in local calendar days.
 PERSISTENCE_STRIDE_DAYS: Final = 1
 SEASONAL_NAIVE_STRIDE_DAYS: Final = 7
 
-# How far back to look before giving up. Generous enough to cross the observation lag plus a run of
-# gaps, bounded so a sparsely-covered site cannot silently reach back a season for a value.
-_MAX_STEPS: Final = 60
+# How far back either baseline may reach is `vintage.MAX_LOOKBACK_DAYS`, converted at the stride in
+# use. Bounding the *step count* here was the bug: at a stride of seven, sixty steps is fourteen
+# months, so a sparsely-covered site could get a value from over a year earlier reported under the
+# same `persistence_rule_id` as a one-week lookup.
 
 MODEL_PERSISTENCE: Final = "persistence"
 MODEL_SEASONAL_NAIVE: Final = "seasonal_naive"
@@ -43,7 +44,7 @@ def latest_observed_value(
     issue_ms: int,
     lag_hours: int,
     stride_days: int,
-    max_steps: int = _MAX_STEPS,
+    steps: int | None = None,
 ) -> tuple[int, float] | None:
     """The most recent equivalent hour that was both *observable* and actually *present*.
 
@@ -52,10 +53,14 @@ def latest_observed_value(
     (a genuine gap -- the seeded June window has one, deliberately). Neither is a value, so both
     continue the walk; running out of steps returns ``None`` rather than the nearest thing to hand.
 
+    The default bound is :data:`~energy_platform.forecasting.vintage.MAX_LOOKBACK_DAYS` converted at
+    this stride, so "how far back" means the same distance whether the caller strides by a day or by
+    a week.
+
     Returns the instant alongside the value so the caller can declare the feature's availability
     from the hour it actually came from, not from an assumed offset.
     """
-    for step in range(1, max_steps + 1):
+    for step in range(1, (max_steps(stride_days) if steps is None else steps) + 1):
         candidate = equivalent_hour_ms(target_ts_utc_ms, step * stride_days)
         if not is_observable(candidate, issue_ms, lag_hours):
             continue

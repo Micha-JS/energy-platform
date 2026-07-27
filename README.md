@@ -471,7 +471,10 @@ Design decisions worth calling out:
 - **A synthetic-trained model is refused for real prediction.** The residual model has learned to
   undo a transposition real data needs; outside the simulator that is a confident error, not
   knowledge. Every artifact records its `training_data_source` and `load_artifact` raises rather
-  than warning. The known limitation is an interlock, not a note.
+  than warning. The known limitation is an interlock, not a note. It guards *reuse*, and M7 reuses
+  nothing: the backtest refits per fold, so it writes no artifact and `forecast_runs.artifact_key`
+  is null on every M7 row — pinned by a test, so the column cannot start claiming otherwise while
+  this paragraph still says it does not. The interlock is the seam M8's serving path loads through.
 - **"Persistence = yesterday" is lookahead here, and the harness says so.** Synthetic telemetry is
   generated from ERA5-backed archive weather that settles ~5 days late, so yesterday's PV has not
   been observed when today's forecast is issued. Baselines walk back to the most recent

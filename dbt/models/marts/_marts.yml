@@ -386,8 +386,12 @@ models:
         tests:
           - dbt_utils.accepted_range: {min_value: 0, config: {where: "rmse_kwh is not null"}}
       - name: pinball_p50_kwh
-        description: Half the MAE by construction -- the identity the reconciliation test pins.
+        description: >
+          Half the MAE by construction -- the identity the reconciliation test pins. Populated for
+          every model including the point-forecast ones: a scoreable hour has a p50 by definition.
+          Only the p10/p90 losses are null for models that made no interval claim.
         tests:
+          - not_null
           - dbt_utils.accepted_range: {min_value: 0, config: {where: "pinball_p50_kwh is not null"}}
       - name: interval_coverage_p10_p90
         description: Empirical fraction inside [p10, p90]. Target 0.80; reported, not claimed.

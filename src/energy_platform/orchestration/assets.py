@@ -418,7 +418,7 @@ def forecast_backtest_derived(
     site = config.site.default
     windows = load_coverage_windows()
 
-    runs = predictions = skipped = 0
+    runs = predictions = skipped = cleared = 0
     with forecast_store.get_repository() as repo:
         repo.ensure_schema()  # type: ignore[attr-defined]
         has_observations, has_vintages = repo.input_relations_exist()  # type: ignore[attr-defined]
@@ -433,6 +433,11 @@ def forecast_backtest_derived(
                 site.id, config.forecast.forecast_source, window.start, window.end
             )
             if not observations:
+                # Cleared even though nothing is written -- see `store.replace_window`. A window
+                # whose telemetry has gone away must lose its rows, not keep serving the last fit.
+                cleared += repo.replace_window(  # type: ignore[attr-defined]
+                    [(site.id, target, window.start, window.end) for target in runner.TARGETS], []
+                ).replaced
                 continue
             for target in runner.TARGETS:
                 result = runner.backtest(
@@ -447,22 +452,24 @@ def forecast_backtest_derived(
                 )
                 skipped += len(result.skipped_days)
                 runs += len(result.runs)
-                if result.runs:
-                    counts = repo.replace_window(  # type: ignore[attr-defined]
-                        [
-                            run_payload(
-                                run, config.forecast, SELECTION_RULE_ID, PERSISTENCE_RULE_ID
-                            )
-                            for run in result.runs
-                        ]
-                    )
-                    predictions += counts.predictions
+                counts = repo.replace_window(  # type: ignore[attr-defined]
+                    [(site.id, target, window.start, window.end)],
+                    [
+                        run_payload(run, config.forecast, SELECTION_RULE_ID, PERSISTENCE_RULE_ID)
+                        for run in result.runs
+                    ],
+                )
+                predictions += counts.predictions
+                cleared += counts.replaced
 
-    context.log.info("Backtest complete: runs=%d predictions=%d", runs, predictions)
+    context.log.info(
+        "Backtest complete: runs=%d predictions=%d replaced=%d", runs, predictions, cleared
+    )
     return MaterializeResult(
         metadata={
             "runs": runs,
             "predictions": predictions,
+            "runs_replaced": cleared,
             "days_without_a_vintage": skipped,
             "windows": len(windows),
             "vintage_source": config.forecast.forecast_source,

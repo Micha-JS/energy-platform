@@ -23,12 +23,22 @@ is: **same thread count and library versions, identical predictions; different t
 identical metrics to reported precision but not identical bits.** No hash equality is claimed and no
 test asserts one.
 
-**The provenance interlock.** A residual model fitted on synthetic windows has learned to undo a
-plane-of-array transposition that a real tilted array does not need undone. Outside the simulator
-that is not knowledge, it is a systematic error wearing a confident face. So every artifact records
-the ``training_data_source`` it was fitted on, and :func:`load_artifact` *refuses* to return a
-synthetic-trained model to a real-mode caller. That refusal is a hard error rather than a warning:
-the whole point is that it cannot be ignored by someone in a hurry.
+**The provenance interlock, and exactly where it bites.** A residual model fitted on synthetic
+windows has learned to undo a plane-of-array transposition that a real tilted array does not need
+undone. Outside the simulator that is not knowledge, it is a systematic error wearing a confident
+face. So every artifact records the ``training_data_source`` it was fitted on, and
+:func:`load_artifact` *refuses* to return a synthetic-trained model to a real-mode caller. That
+refusal is a hard error rather than a warning: the whole point is that it cannot be ignored by
+someone in a hurry.
+
+It guards *reuse*, and M7 does not reuse. The backtest refits from scratch per fold -- seconds at
+this data size, and the only way an expanding window can be honest -- so it neither writes nor reads
+an artifact, and ``derived.forecast_runs.artifact_key`` is null on every row M7 produces
+(``tests/forecasting/test_backtest.py`` pins that, so the column and the story cannot drift apart in
+silence). :func:`save_artifact` and :func:`load_artifact` are the seam a *serving* path uses --
+predicting tomorrow from a model fitted once, rather than scoring yesterday from a model fitted per
+fold -- which is M8's shape, not this milestone's. Stating that plainly beats implying a safeguard
+is firing on a path nothing walks yet.
 
 The hyperparameters are deliberately off the defaults. The largest PV fold is ~1 300 daylight rows;
 ``max_leaf_nodes=31, min_samples_leaf=20`` puts ~20 rows in a leaf at full depth, which is

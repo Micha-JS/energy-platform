@@ -77,9 +77,13 @@ select
     round(avg(signed_error_kwh)::numeric, 6)            as bias_kwh,
     round(sqrt(avg(power(signed_error_kwh, 2)))::numeric, 6) as rmse_kwh,
 
-    -- Quantile losses are null for the models that emit a point forecast only (the baselines and
-    -- the two physical models). Null rather than zero: a model that made no interval claim has not
-    -- earned a perfect interval score.
+    -- The *tail* losses are null for the models that emit a point forecast only (the baselines and
+    -- the two physical models), because p10 and p90 are null for them. Null rather than zero: a
+    -- model that made no interval claim has not earned a perfect interval score.
+    --
+    -- pinball_p50 is populated for every model, point-forecast ones included: `is_scoreable`
+    -- already guarantees a non-null p50, so the CASE always evaluates. It is half the MAE by
+    -- construction, which is the identity tests/dbt/test_forecast_reconciliation.py pins.
     round(avg(pinball_p10)::numeric, 6)                 as pinball_p10_kwh,
     round(avg(pinball_p50)::numeric, 6)                 as pinball_p50_kwh,
     round(avg(pinball_p90)::numeric, 6)                 as pinball_p90_kwh,

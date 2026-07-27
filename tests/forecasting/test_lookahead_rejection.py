@@ -27,6 +27,10 @@ from datetime import UTC, date, datetime
 import pytest
 
 from energy_platform.config import DEFAULT_TELEMETRY_LAG_HOURS
+from energy_platform.forecasting.baselines import (
+    PERSISTENCE_STRIDE_DAYS,
+    SEASONAL_NAIVE_STRIDE_DAYS,
+)
 from energy_platform.forecasting.features import (
     Feature,
     FeatureKind,
@@ -38,10 +42,12 @@ from energy_platform.forecasting.features import (
     vintage_features,
 )
 from energy_platform.forecasting.vintage import (
+    MAX_LOOKBACK_DAYS,
     equivalent_hour_ms,
     is_observable,
     issue_time_ms,
     latest_observable_equivalent,
+    max_steps,
     observable_at,
     select_vintage,
 )
@@ -176,6 +182,20 @@ def test_the_baseline_walks_back_until_the_value_was_actually_observed() -> None
     assert (NOON_MS - observed) // (24 * _HOUR_MS) == 6
 
 
+def test_the_hour_beginning_at_the_issue_instant_is_not_observable_at_it() -> None:
+    """The zero-lag leak, at the one instant where only the interval term stands in the way.
+
+    An hourly reading stamped at ``ts`` summarises ``[ts, ts + 1h)``, so the hour that *begins* when
+    the prediction is issued has not finished happening. Without that term a lag-0 platform -- a
+    real house on Home Assistant, and every fixture in ``test_backtest`` -- trains each fold on the
+    first hour of the very day it is scoring, and no feature-level check can see it: the leaked
+    quantity is the label, not a feature.
+    """
+    assert not is_observable(ISSUE_MS, ISSUE_MS, 0)
+    assert is_observable(ISSUE_MS - _HOUR_MS, ISSUE_MS, 0)
+    assert observable_at(ISSUE_MS, 0) == ISSUE_MS + _HOUR_MS
+
+
 def test_a_zero_lag_platform_gets_a_genuine_yesterday_baseline() -> None:
     """A real house reports live, so the same code yields the textbook baseline. The rule is one
     rule; only the lag differs, which is why it is configuration and not a branch."""
@@ -190,9 +210,21 @@ def test_no_observable_equivalent_yields_none_rather_than_reaching_further_back(
     reached past its own search bound would be a different baseline than the one the mart names.
     """
     observed = latest_observable_equivalent(
-        NOON_MS, issue_ms=ISSUE_MS, lag_hours=LAG_HOURS, stride_days=1, max_steps=3
+        NOON_MS, issue_ms=ISSUE_MS, lag_hours=LAG_HOURS, stride_days=1, steps=3
     )
     assert observed is None
+
+
+def test_the_lookback_bound_is_the_same_distance_at_every_stride() -> None:
+    """Bounding steps rather than days let the weekly baseline reach back fourteen months.
+
+    ``seasonal_naive`` strides by seven, so a sixty-*step* bound was ~420 days -- and a value from
+    over a year earlier was reported in the mart under the same ``persistence_rule_id`` as a
+    one-week lookup. The bound has to be stated in the unit the claim is made in.
+    """
+    for stride in (PERSISTENCE_STRIDE_DAYS, SEASONAL_NAIVE_STRIDE_DAYS):
+        assert max_steps(stride) * stride <= MAX_LOOKBACK_DAYS
+    assert max_steps(SEASONAL_NAIVE_STRIDE_DAYS) * SEASONAL_NAIVE_STRIDE_DAYS >= LAG_HOURS // 24
 
 
 # -- Attempt 4: decline to declare availability -------------------------------------------

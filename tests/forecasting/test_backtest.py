@@ -77,14 +77,18 @@ def _load_kwh(ts_utc_ms: int) -> float:
     return round(0.25 + 0.2 * math.sin(math.pi * hour / 12.0) ** 2, 6)
 
 
-def _observations(days: Sequence[date]) -> list[Observation]:
-    """Hourly actuals whose PV is exactly ``GHI / 100`` -- see :func:`_perfect_physics`."""
+def _observations(days: Sequence[date], *, hole_on: date | None = None) -> list[Observation]:
+    """Hourly actuals whose PV is exactly ``GHI / 100`` -- see :func:`_perfect_physics`.
+
+    ``hole_on`` blanks one day's load, reproducing the seeded June window's deliberate telemetry
+    gap: the hours still exist and are still predicted, they simply have no label to fit on.
+    """
     return [
         Observation(
             ts_utc_ms=ts_ms,
             local_date=day,
             pv_production_kwh=_ghi(ts_ms) / 100.0,
-            household_load_kwh=_load_kwh(ts_ms),
+            household_load_kwh=None if day == hole_on else _load_kwh(ts_ms),
         )
         for day in days
         for ts_ms in _hours(day)
@@ -134,6 +138,7 @@ def _run(
     *,
     config: ForecastConfig = CONFIG,
     truncate_last_day_from_hour: int | None = None,
+    hole_on: date | None = None,
 ) -> BacktestResult:
     days = _days(start, end)
     return runner.backtest(
@@ -141,7 +146,7 @@ def _run(
         target,
         start,
         end,
-        _observations(days),
+        _observations(days, hole_on=hole_on),
         _vintages(days, truncate_last_day_from_hour=truncate_last_day_from_hour),
         config=config,
         pv=PV,
@@ -276,6 +281,39 @@ def test_a_run_reports_the_span_it_trained_on_rather_than_the_window() -> None:
     assert run.n_train_rows > 0
 
 
+def test_no_fold_trains_on_any_hour_of_the_day_it_is_scoring() -> None:
+    """The lag-0 boundary, end to end. ``CONFIG`` uses lag 0, so nothing else stands in the way.
+
+    An hourly row is stamped at the instant its interval *starts*, so the hour beginning at the
+    issue instant is the target day's own first hour. Admitting it puts a label in the fit that is
+    simultaneously in the scoring set -- invisible to ``check_no_lookahead``, which validates
+    features against the issue time and never sees the label at all.
+    """
+    run = _by_key(_run(TARGET_LOAD, date(2024, 4, 1), date(2024, 4, 12)))[MODEL_LOAD_HGB]
+    last_scored = max(prediction.local_date for prediction in run.predictions)
+
+    assert run.train_end is not None
+    assert run.train_end < last_scored
+
+
+def test_the_training_row_count_is_the_rows_fitted_not_the_rows_offered() -> None:
+    """A telemetry hole inside the training span must show up in ``n_train_rows``.
+
+    Counting candidates instead would have ``derived.forecast_runs`` claim a fit over hours that
+    were dropped for having no label -- and the seeded June window has exactly such a hole, so the
+    overstatement would be in the shipped provenance rather than only in principle.
+    """
+    start, end = date(2024, 4, 1), date(2024, 4, 12)
+    hole = date(2024, 4, 3)  # inside every fold's training span, and a full 24-hour day
+
+    full = _by_key(_run(TARGET_LOAD, start, end))[MODEL_LOAD_HGB]
+    holed = _by_key(_run(TARGET_LOAD, start, end, hole_on=hole))[MODEL_LOAD_HGB]
+
+    assert full.train_start is not None and full.train_end is not None
+    assert full.train_start <= hole <= full.train_end
+    assert holed.n_train_rows == full.n_train_rows - 24
+
+
 def test_the_training_free_models_carry_no_training_span_and_no_row_count() -> None:
     """A reader of ``derived.forecast_runs`` must not see 2 000 training rows against a lookup."""
     runs = _by_key(_run(TARGET_PV, date(2024, 4, 1), date(2024, 4, 12)))
@@ -283,6 +321,23 @@ def test_the_training_free_models_carry_no_training_span_and_no_row_count() -> N
         run = runs[key]
         assert (run.train_start, run.train_end, run.n_train_rows) == (None, None, 0), key
     assert runs[MODEL_PVLIB_HGB].n_train_rows > 0
+
+
+def test_a_run_claims_no_artifact_because_the_backtest_persists_none() -> None:
+    """The provenance interlock guards *reuse*, and the backtest reuses nothing.
+
+    Every fold refits from scratch, so no artifact is written and no run may cite one. Without this
+    the module docstring, the README bullet and ``forecast_runs.artifact_key`` are three
+    descriptions of a path nothing walks, free to drift apart in silence -- and a key naming a file
+    that was never saved is worse provenance than an honest null.
+    """
+    from energy_platform.forecasting.store import run_payload
+
+    result = _run(TARGET_LOAD, date(2024, 4, 1), date(2024, 4, 12))
+    assert any(run.model_key == MODEL_LOAD_HGB for run in result.runs), "a model must be fitted"
+    for run in result.runs:
+        header, _ = run_payload(run, CONFIG, "selection", "persistence")
+        assert header["artifact_key"] is None, run.model_key
 
 
 def test_every_model_is_scored_over_the_same_days() -> None:

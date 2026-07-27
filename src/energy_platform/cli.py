@@ -687,7 +687,7 @@ def _run_forecast(args: argparse.Namespace) -> int:
         config.forecast.fold_stride_days,
     )
 
-    written = runs_seen = skipped = 0
+    written = runs_seen = skipped = cleared = 0
     with psycopg.connect(config.postgres.dsn) as conn:
         repo = ForecastRepository(
             conn,
@@ -715,7 +715,14 @@ def _run_forecast(args: argparse.Namespace) -> int:
                 site_id, config.forecast.forecast_source, window.start, window.end
             )
             if not observations:
-                logger.warning("  %s %s: no observations, skipped", window, site_id)
+                # Skipped, but still cleared. A window that stops producing rows -- the telemetry
+                # behind it withdrawn, the seed shortened -- must stop having rows, or the previous
+                # run's fit keeps being served by `mart_forecast_eval` as if it were current.
+                logger.warning("  %s %s: no observations, clearing and skipping", window, site_id)
+                if not ad_hoc:
+                    cleared += repo.replace_window(
+                        [(site_id, target, window.start, window.end) for target in targets], []
+                    ).replaced
                 continue
             for target in targets:
                 result = runner.backtest(
@@ -740,21 +747,26 @@ def _run_forecast(args: argparse.Namespace) -> int:
                         len(run.predictions),
                         run.n_train_rows,
                     )
-                if not ad_hoc and result.runs:
+                if not ad_hoc:
+                    # Unconditional on `result.runs`: the scope is what was evaluated, so a target
+                    # that now yields nothing clears its old rows instead of leaving them current.
                     counts = repo.replace_window(
+                        [(site_id, target, window.start, window.end)],
                         [
                             run_payload(
                                 run, config.forecast, SELECTION_RULE_ID, PERSISTENCE_RULE_ID
                             )
                             for run in result.runs
-                        ]
+                        ],
                     )
                     written += counts.predictions
+                    cleared += counts.replaced
 
     logger.info(
-        "Done. runs=%d predictions_written=%d days_without_a_vintage=%d",
+        "Done. runs=%d predictions_written=%d runs_replaced=%d days_without_a_vintage=%d",
         runs_seen,
         written,
+        cleared,
         skipped,
     )
     return 0

@@ -45,6 +45,26 @@ PERSISTENCE_RULE_ID: Final = "last_equivalent_hour_observable_at_issue"
 
 _HOUR_MS: Final = 3_600_000
 
+# Telemetry is hourly and an hour is stamped at the instant it *starts*, so the reading for
+# ``ts`` summarises ``[ts, ts + 1h)`` and does not exist as a complete number until that interval
+# closes. The observation lag is measured from there, not from the stamp -- see
+# :func:`observable_at`, which is the only place this resolution is applied.
+OBSERVATION_RESOLUTION_MS: Final = _HOUR_MS
+
+# How far back any walk-until-observable may reach, in *calendar days*. Generous enough to cross
+# the observation lag plus a run of gaps, bounded so a sparsely-covered site cannot silently reach
+# back a season for a value.
+#
+# Days, not steps, and the difference is not cosmetic: bounding the step count makes the real reach
+# depend on the stride, so the same "60" meant two months at a one-day stride and fourteen months at
+# a seven-day one -- with both reported under the same rule id.
+MAX_LOOKBACK_DAYS: Final = 60
+
+
+def max_steps(stride_days: int) -> int:
+    """Steps of ``stride_days`` inside :data:`MAX_LOOKBACK_DAYS`, and never fewer than one."""
+    return max(1, MAX_LOOKBACK_DAYS // stride_days)
+
 
 def issue_time_ms(target_day: date) -> int:
     """The instant a prediction for ``target_day`` is issued: Berlin midnight starting that day."""
@@ -65,14 +85,25 @@ def select_vintage(issue_times_ms: Iterable[int], target_day: date) -> int | Non
 
 
 def observable_at(ts_utc_ms: int, lag_hours: int) -> int:
-    """When an actual for instant ``ts_utc_ms`` becomes knowable.
+    """When an actual for the hour *starting* at ``ts_utc_ms`` becomes knowable.
 
-    Not zero on this platform. Synthetic telemetry is generated from Open-Meteo archive weather,
-    which is ERA5-backed and settles about five days late, so a synthetic hour cannot be observed
-    until the weather behind it has been. See ``ForecastConfig.telemetry_lag_hours``; a real house
-    reporting over Home Assistant has a lag of 0 and this collapses to the identity.
+    Two terms, and dropping either one is a leak:
+
+    * **The interval itself.** An hourly reading stamped at ``ts`` covers ``[ts, ts + 1h)``, so it
+      is not a finished number until ``ts + 1h``. This term is what keeps a zero-lag platform
+      honest: without it the hour beginning at the issue instant counts as already observed, and a
+      fold would train on the first hour of the very day it is predicting.
+    * **The reporting lag.** Not zero on this platform. Synthetic telemetry is generated from
+      Open-Meteo archive weather, which is ERA5-backed and settles about five days late, so a
+      synthetic hour cannot be observed until the weather behind it has been. See
+      ``ForecastConfig.telemetry_lag_hours``; a real house reporting over Home Assistant has a lag
+      of 0, which leaves the interval term alone rather than collapsing to the identity.
+
+    Every caller resolves observability through here -- the training filter, the naive baselines and
+    the lagged-actual feature's declared availability alike. The bug this signature prevents is the
+    one that shipped: three call sites, each re-deriving ``ts + lag`` by hand, one of them wrong.
     """
-    return ts_utc_ms + lag_hours * _HOUR_MS
+    return ts_utc_ms + OBSERVATION_RESOLUTION_MS + lag_hours * _HOUR_MS
 
 
 def is_observable(ts_utc_ms: int, issue_ms: int, lag_hours: int) -> bool:
@@ -104,7 +135,7 @@ def latest_observable_equivalent(
     issue_ms: int,
     lag_hours: int,
     stride_days: int,
-    max_steps: int = 60,
+    steps: int | None = None,
 ) -> int | None:
     """Walk back in ``stride_days`` steps to the most recent equivalent hour already observed.
 
@@ -114,10 +145,11 @@ def latest_observable_equivalent(
     worst possible reason. Stepping back until the value is genuinely observable makes the baseline
     weaker and correct, which is the trade the whole milestone is about.
 
-    Returns ``None`` if no equivalent hour within ``max_steps`` strides is observable, rather than
-    reaching arbitrarily far into the past for something to say.
+    Returns ``None`` if no equivalent hour within :data:`MAX_LOOKBACK_DAYS` (or an explicit
+    ``steps``) is observable, rather than reaching arbitrarily far into the past for something to
+    say.
     """
-    for step in range(1, max_steps + 1):
+    for step in range(1, (max_steps(stride_days) if steps is None else steps) + 1):
         candidate = equivalent_hour_ms(target_ts_utc_ms, step * stride_days)
         if is_observable(candidate, issue_ms, lag_hours):
             return candidate

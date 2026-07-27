@@ -19,6 +19,7 @@ columns, so nothing is lost.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import TYPE_CHECKING, Final
@@ -252,9 +253,11 @@ class ForecastRepository:
             )
 
     def replace_window(
-        self, runs: list[tuple[dict[str, object], list[dict[str, object]]]]
+        self,
+        scope: Sequence[tuple[str, str, date, date]],
+        runs: Sequence[tuple[dict[str, object], list[dict[str, object]]]],
     ) -> WriteCounts:
-        """Delete and rewrite every run for the windows being reported, in one transaction.
+        """Delete every run in ``scope`` and write ``runs`` in its place, in one transaction.
 
         Replace rather than upsert, and clear the whole ``(site, target, window)`` group before
         writing any of it: a partial rewrite would leave a mart aggregating predictions from two
@@ -265,13 +268,28 @@ class ForecastRepository:
         on, or because it was removed outright -- would keep its last rows in ``derived`` forever
         and keep appearing in ``mart_forecast_eval`` beside models that were actually re-run. A
         stale row that looks current is worse than a missing one.
+
+        ``scope`` is what the caller *evaluated*, passed separately from what it *produced*, and
+        that separation is the whole point. Deriving the delete keys from ``runs`` -- as this did --
+        defeats the reasoning above at its limit: a re-run that emits nothing for a window (no
+        eligible vintage left, no observations at all) deletes nothing, and the previous fit's rows
+        go on being served as current. An empty ``runs`` against a non-empty ``scope`` is therefore
+        a legitimate and load-bearing call, not a no-op to skip.
         """
+        keys = list(dict.fromkeys(scope))
+        outside = {
+            (run["site"], run["target"], run["window_start"], run["window_end"]) for run, _ in runs
+        } - set(keys)
+        if outside:
+            raise ForecastInputError(
+                f"refusing to write runs outside the declared scope: {sorted(map(str, outside))}. "
+                "A run written under a key that was never cleared would sit beside the rows it was "
+                "meant to replace."
+            )
+
         written_runs = written_predictions = replaced = 0
         with self._conn.transaction(), self._conn.cursor() as cur:
-            for site, target, window_start, window_end in dict.fromkeys(
-                (run["site"], run["target"], run["window_start"], run["window_end"])
-                for run, _ in runs
-            ):
+            for site, target, window_start, window_end in keys:
                 cur.execute(
                     sql.SQL("""
                         delete from {schema}.forecast_runs
@@ -369,6 +387,10 @@ def run_payload(
         "feature_names": list(run.feature_names),
         "hyperparameters": dict(HYPERPARAMETERS),
         "library_versions": library_versions(),
+        # Null, and not as a placeholder: the backtest refits per fold and persists nothing, so
+        # there is no artifact for a run to point at. The column exists for the serving path that
+        # loads through `models.load_artifact`; writing a key here for a file that was never saved
+        # would make the provenance record cite an artifact nobody can produce.
         "artifact_key": None,
     }
     predictions: list[dict[str, object]] = [
