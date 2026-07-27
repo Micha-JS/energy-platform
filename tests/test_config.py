@@ -77,10 +77,11 @@ def test_system_defaults_match_the_fenecon(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_tariff_defaults_name_catalogue_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    # ENERGY_TARIFF_CATALOG is cleared so load_catalog() below reads the committed seed; the
+    # config never carries the path, only the ids.
     for var in ("ENERGY_TARIFF_CATALOG", "ENERGY_TARIFF_ID", "ENERGY_FEED_IN_TARIFF_ID"):
         monkeypatch.delenv(var, raising=False)
     config = TariffConfig.from_env()
-    assert config.catalog_path == ""  # unset: the committed seed is used
     # Ids, never rates -- every rate lives in the catalogue the dbt seed and the engine share.
     catalog = load_catalog()
     assert config.consumption_tariff_id in catalog

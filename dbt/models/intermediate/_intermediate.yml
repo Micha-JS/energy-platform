@@ -56,7 +56,9 @@ models:
         tests:
           - dbt_utils.accepted_range: {min_value: 0, config: {where: "grid_export_kwh is not null"}}
       - name: self_consumed_kwh
-        description: PV consumed on site (pv - export), accounted at the meter.
+        description: >
+          Load served without the grid (load - import); see the SQL header for why not
+          pv - export, which credits stored energy the day-boundary SoC reset discards.
         tests:
           - dbt_utils.accepted_range: {min_value: 0, config: {where: "self_consumed_kwh is not null"}}
 

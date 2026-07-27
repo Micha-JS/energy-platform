@@ -13,7 +13,7 @@ over the compiled dbt manifest, not by scanning SQL text (a transitive dependent
   predicate, so the one permitted reader cannot be silently gutted.
 
 Skipped when the manifest is absent (dbt not built), so the general ``pytest`` run stays green; CI
-runs ``dbt build`` first, then this.
+runs ``dbt build`` first, sets ``ENERGY_REQUIRE_DBT=1``, and that skip becomes a failure.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-import pytest
+from tests.dbt.warehouse_guard import skip_or_fail
 
 MANIFEST = Path(__file__).resolve().parents[2] / "dbt" / "target" / "manifest.json"
 FORECAST_SOURCE_ID = "source.energy_platform.raw.forecast_observations"
@@ -33,7 +33,7 @@ VINTAGE_PREDICATE = re.compile(r"\bissue_time\b|\bissue_date\b")
 
 def _load_manifest() -> dict[str, Any]:
     if not MANIFEST.exists():
-        pytest.skip(f"dbt manifest not found at {MANIFEST}; run `dbt build` first")
+        skip_or_fail(f"dbt manifest not found at {MANIFEST}; run `dbt build` first")
     parsed: dict[str, Any] = json.loads(MANIFEST.read_text())
     return parsed
 

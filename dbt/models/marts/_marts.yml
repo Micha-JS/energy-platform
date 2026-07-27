@@ -68,6 +68,13 @@ models:
         tests:
           - not_null
           - dbt_utils.accepted_range: {min_value: 672, max_value: 745}
+      - name: covered_hours
+        description: >
+          Hours of the month inside the declared coverage_windows. Separates "never covered" from
+          "covered and gapped"; never exceeds expected_hours.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 745}
       - name: priced_hours
         tests:
           - not_null
@@ -86,7 +93,9 @@ models:
       between grid cost avoided and feed-in revenue. Keeping the scenario dimension is the point --
       the difference between battery and no_battery is what the battery does. Rates are computed
       over the same priced-hour population as their denominator and are NULL where the denominator
-      is zero. Grain: (local_month, region, scenario, tariff_id).
+      is zero. Carries the same coverage columns as mart_tariff_counterfactuals -- expected_hours,
+      covered_hours, priced_hours, gap_hours, completeness_ratio, is_partial_month -- so no monthly
+      row is presented as if it were whole. Grain: (local_month, region, scenario, tariff_id).
     tests:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns: [local_month, region, scenario, tariff_id]
@@ -121,6 +130,22 @@ models:
         description: >
           Self-consumed kWh valued at the import price of the hour they were consumed in -- summed
           hourly, never derived from a monthly average price (which a dynamic tariff would break).
+      - name: expected_hours
+        description: Hours in the calendar month, from the Berlin calendar -- 743 in March, 745 in October.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 672, max_value: 745}
+      - name: covered_hours
+        description: >
+          Hours of the month inside the declared coverage_windows. Separates "never covered" from
+          "covered and gapped"; never exceeds expected_hours.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 745}
+      - name: priced_hours
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0}
       - name: completeness_ratio
         tests:
           - not_null
