@@ -26,7 +26,11 @@
 --
 -- Coverage columns follow mart_tariff_counterfactuals exactly; see that model for the convention.
 
-with monthly as (
+with declared as (
+    {{ declared_coverage_hours() }}
+),
+
+monthly as (
     select
         date_trunc('month', local_date)::date                as local_month,
         region,
@@ -48,6 +52,15 @@ with monthly as (
         sum(battery_discharge_kwh)  filter (where is_priced) as battery_discharge_kwh
     from {{ ref('int_hourly_tariff_cost') }}
     group by 1, 2, 3, 4
+),
+
+covered as (
+    select
+        m.*,
+        {{ berlin_month_hours('m.local_month') }} as expected_hours,
+        coalesce(d.covered_hours, 0)              as covered_hours
+    from monthly m
+    left join declared d on d.local_month = m.local_month
 )
 
 select
@@ -79,11 +92,11 @@ select
     feed_in_revenue_eur,
     avoided_grid_cost_eur + feed_in_revenue_eur           as solar_value_eur,
 
+    expected_hours,
+    covered_hours,
     priced_hours,
-    {{ berlin_month_hours('local_month') }}               as expected_hours,
-    {{ berlin_month_hours('local_month') }} - priced_hours as gap_hours,
-    priced_hours::numeric
-        / {{ berlin_month_hours('local_month') }}         as completeness_ratio,
-    priced_hours < {{ berlin_month_hours('local_month') }} as is_partial_month
+    expected_hours - priced_hours                         as gap_hours,
+    priced_hours::numeric / expected_hours                as completeness_ratio,
+    priced_hours < expected_hours                         as is_partial_month
 
-from monthly
+from covered

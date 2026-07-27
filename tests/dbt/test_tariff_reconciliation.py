@@ -22,7 +22,6 @@ reconciliation that silently does not run is indistinguishable from one that pas
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterator, Mapping
 from typing import Any
 
@@ -35,6 +34,7 @@ from energy_platform.tariffs.engine import (
     feed_in_revenue_eur,
     import_price_ct_kwh,
 )
+from tests.dbt.warehouse_guard import skip_or_fail
 
 pytestmark = pytest.mark.postgres
 
@@ -47,16 +47,6 @@ COST_RELATION = "analytics_intermediate.int_hourly_tariff_cost"
 TOLERANCE_EUR = 1e-9
 
 
-def _require_dbt() -> bool:
-    return bool(os.environ.get("ENERGY_REQUIRE_DBT"))
-
-
-def _skip_or_fail(reason: str) -> None:
-    if _require_dbt():
-        pytest.fail(f"ENERGY_REQUIRE_DBT is set but {reason}")
-    pytest.skip(reason)
-
-
 @pytest.fixture
 def cost_rows(
     postgres_conn: psycopg.Connection[tuple[object, ...]],
@@ -66,7 +56,7 @@ def cost_rows(
         cur.execute("select to_regclass(%s)", (COST_RELATION,))
         row = cur.fetchone()
         if row is None or row[0] is None:
-            _skip_or_fail(f"{COST_RELATION} does not exist; run `dbt build` first")
+            skip_or_fail(f"{COST_RELATION} does not exist; run `dbt build` first")
 
         cur.execute(
             f"""

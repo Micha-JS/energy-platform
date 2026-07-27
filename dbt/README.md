@@ -35,6 +35,9 @@ Under the hood these are `uv run --project dbt dbt ...` (dbt env) and `uv run en
   conservation, and the partial-month coverage flag.
 - `macros/berlin_calendar.sql` — the one place DST calendar columns are derived.
 - `macros/tariff_price.sql` — the one place the SQL side of the tariff arithmetic lives.
+- `macros/berlin_month_hours.sql`, `macros/declared_coverage_hours.sql` — the calendar length of a
+  month and the hours of it the coverage windows claim; shared so both monthly marts count the
+  same way.
 
 Two guards live in the app's pytest suite rather than here, because both need artefacts a dbt run
 produces (`../tests/dbt/`, run after `dbt build`):

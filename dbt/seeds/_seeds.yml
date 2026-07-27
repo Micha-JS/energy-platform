@@ -50,7 +50,13 @@ seeds:
         tests:
           - dbt_utils.accepted_range: {min_value: 0, max_value: 100, config: {where: "base_fee_eur_month is not null"}}
       - name: vat_rate
-        description: Fraction, not a percentage -- 19% is 0.19. Zero on feed_in rows.
+        description: >
+          Fraction, not a percentage -- 19% is 0.19. Zero on feed_in rows. The range is the
+          half-open [0, 1): a rate of exactly 1.0 is a 19-for-0.19 slip, not a VAT rate.
         tests:
           - not_null
-          - dbt_utils.accepted_range: {min_value: 0, max_value: 1}
+          # Not accepted_range: its `inclusive` flag applies to both ends at once, so it can
+          # express neither [0, 1) nor the strict upper bound TariffSpec.__post_init__ enforces.
+          # A row this test passed but the Python loader rejects would seed cleanly and then
+          # fail the reconciliation -- the drift these seed tests exist to catch.
+          - dbt_utils.expression_is_true: {expression: ">= 0 and vat_rate < 1"}

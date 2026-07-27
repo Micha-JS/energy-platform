@@ -325,7 +325,7 @@ class SyntheticConfig:
 
 @dataclass(frozen=True, slots=True)
 class TariffConfig:
-    """Which tariffs to price with, and where the catalogue lives.
+    """Which tariffs to price with.
 
     Deliberately holds no prices: every tariff *parameter* lives in the committed catalogue CSV
     that dbt also seeds (see :mod:`energy_platform.tariffs.catalog`), so a rate can never differ
@@ -333,16 +333,19 @@ class TariffConfig:
     ids must match the dbt vars of the same names (``consumption_tariff_id`` corresponds to the
     tariffs the counterfactual mart prices; ``feed_in_tariff_id`` to the one it compensates
     exports with).
+
+    Nor does it hold the catalogue's *location*: :func:`energy_platform.tariffs.catalog.
+    catalog_path` resolves ``ENERGY_TARIFF_CATALOG`` at load time and is the single reader.
+    Snapshotting it here too would give the same setting two representations, free to disagree
+    once anything touches the environment between construction and load.
     """
 
-    catalog_path: str = ""
     consumption_tariff_id: str = DEFAULT_CONSUMPTION_TARIFF_ID
     feed_in_tariff_id: str = DEFAULT_FEED_IN_TARIFF_ID
 
     @classmethod
     def from_env(cls) -> TariffConfig:
         return cls(
-            catalog_path=_env("ENERGY_TARIFF_CATALOG", default=""),
             consumption_tariff_id=_env("ENERGY_TARIFF_ID", default=DEFAULT_CONSUMPTION_TARIFF_ID),
             feed_in_tariff_id=_env("ENERGY_FEED_IN_TARIFF_ID", default=DEFAULT_FEED_IN_TARIFF_ID),
         )

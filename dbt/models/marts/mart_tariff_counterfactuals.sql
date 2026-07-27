@@ -26,31 +26,12 @@
 -- 41 kWh, enough to make the battery look like a net loss under both tariffs. The column is
 -- charge - discharge over the period: a few percent of charge is honest round-trip loss, anything
 -- larger is the day-boundary reset. NULL for no_battery, which has no battery.
-{% set coverage = var('coverage_windows') %}
-
-with windows (start_date, end_date) as (
-    values
-    {%- for w in coverage %}
-        (date '{{ w.start }}', date '{{ w.end }}'){{ "," if not loop.last }}
-    {%- endfor %}
-),
 
 -- Hours of each month that the declared coverage windows actually claim, so a reader can
 -- separate "the pipeline never covered this month" from "it covered it and the data gapped".
-declared as (
-    select
-        date_trunc('month', local_date)::date as local_month,
-        sum(
-            (extract(epoch from (
-                ((local_date + 1)::timestamp at time zone 'Europe/Berlin')
-                - (local_date::timestamp at time zone 'Europe/Berlin')
-            )) / 3600)::int
-        )::int as covered_hours
-    from (
-        select generate_series(start_date, end_date, interval '1 day')::date as local_date
-        from windows
-    ) days
-    group by 1
+-- Shared with mart_solar_economics, which carries the same column.
+with declared as (
+    {{ declared_coverage_hours() }}
 ),
 
 monthly as (
