@@ -7,7 +7,13 @@ from pathlib import Path
 import pytest
 
 from energy_platform.config import (
+    ARCHIVE_LAG_DAYS,
+    FORECAST_SOURCE_OPEN_METEO,
+    FORECAST_SOURCE_SYNTHETIC,
+    TELEMETRY_SOURCE_FENECON,
+    TELEMETRY_SOURCE_SYNTHETIC,
     BatteryConfig,
+    ForecastConfig,
     HomeAssistantConfig,
     OpenMeteoConfig,
     PostgresConfig,
@@ -126,3 +132,94 @@ def test_bool_env_rejects_garbage(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ENERGY_HA_ENABLED", "maybe")
     with pytest.raises(ValueError, match="ENERGY_HA_ENABLED"):
         HomeAssistantConfig.from_env()
+
+
+# -- M7 forecasting config -------------------------------------------------------------
+
+
+def test_pv_orientation_defaults_to_a_conventional_german_roof(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for var in ("ENERGY_PV_TILT_DEG", "ENERGY_PV_AZIMUTH_DEG"):
+        monkeypatch.delenv(var, raising=False)
+    pv = PvSystemConfig.from_env()
+    assert pv.tilt_deg == 35.0
+    assert pv.azimuth_deg == 180.0  # pvlib convention: 0 = north, clockwise, so 180 is due south
+
+
+def test_pv_orientation_is_overridable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENERGY_PV_TILT_DEG", "12")
+    monkeypatch.setenv("ENERGY_PV_AZIMUTH_DEG", "225")
+    pv = PvSystemConfig.from_env()
+    assert (pv.tilt_deg, pv.azimuth_deg) == (12.0, 225.0)
+
+
+def test_synthetic_telemetry_inherits_the_archive_settling_lag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Synthetic telemetry is generated from archive weather, so it cannot be knowable sooner.
+
+    Derived rather than typed, so the observation lag the backtester enforces and the lag the
+    Dagster schedules target cannot drift apart.
+    """
+    for var in ("ENERGY_TELEMETRY_SOURCE", "ENERGY_TELEMETRY_LAG_HOURS"):
+        monkeypatch.delenv(var, raising=False)
+    forecast = ForecastConfig.from_env()
+    assert forecast.telemetry_source == TELEMETRY_SOURCE_SYNTHETIC
+    assert forecast.telemetry_lag_hours == ARCHIVE_LAG_DAYS * 24
+
+
+def test_a_real_house_reports_live_so_it_has_no_observation_lag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ENERGY_TELEMETRY_SOURCE", TELEMETRY_SOURCE_FENECON)
+    monkeypatch.delenv("ENERGY_TELEMETRY_LAG_HOURS", raising=False)
+    assert ForecastConfig.from_env().telemetry_lag_hours == 0
+
+
+def test_the_observation_lag_is_overridable_independently(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real deployment may buffer; the derived value is a default, not a constraint."""
+    monkeypatch.setenv("ENERGY_TELEMETRY_SOURCE", TELEMETRY_SOURCE_FENECON)
+    monkeypatch.setenv("ENERGY_TELEMETRY_LAG_HOURS", "6")
+    assert ForecastConfig.from_env().telemetry_lag_hours == 6
+
+
+@pytest.mark.parametrize(
+    ("telemetry_source", "expected"),
+    [(TELEMETRY_SOURCE_SYNTHETIC, "synthetic"), (TELEMETRY_SOURCE_FENECON, "real")],
+)
+def test_training_data_source_stamps_provenance(
+    monkeypatch: pytest.MonkeyPatch, telemetry_source: str, expected: str
+) -> None:
+    """Every artifact carries this; real-mode prediction refuses a synthetic-trained model."""
+    monkeypatch.setenv("ENERGY_TELEMETRY_SOURCE", telemetry_source)
+    assert ForecastConfig.from_env().training_data_source == expected
+
+
+def test_an_unknown_telemetry_source_is_treated_as_real(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The safe direction: a future connector is real until it says otherwise.
+
+    Defaulting an unrecognised source to 'synthetic' would let a real house's models be stamped as
+    simulated and silently pass the provenance interlock -- which is the one thing that check
+    exists to prevent.
+    """
+    monkeypatch.setenv("ENERGY_TELEMETRY_SOURCE", "some_future_inverter")
+    assert ForecastConfig.from_env().training_data_source == "real"
+
+
+def test_the_vintage_producer_is_paired_with_the_telemetry_producer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scoring a real house against reconstructed vintages would measure nothing."""
+    monkeypatch.delenv("ENERGY_FORECAST_SOURCE", raising=False)
+    monkeypatch.setenv("ENERGY_TELEMETRY_SOURCE", TELEMETRY_SOURCE_SYNTHETIC)
+    assert ForecastConfig.from_env().forecast_source == FORECAST_SOURCE_SYNTHETIC
+    monkeypatch.setenv("ENERGY_TELEMETRY_SOURCE", TELEMETRY_SOURCE_FENECON)
+    assert ForecastConfig.from_env().forecast_source == FORECAST_SOURCE_OPEN_METEO
+
+
+def test_the_vintage_producer_can_be_overridden(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The one coherent mismatch: synthetic telemetry against genuinely accrued real vintages."""
+    monkeypatch.setenv("ENERGY_TELEMETRY_SOURCE", TELEMETRY_SOURCE_SYNTHETIC)
+    monkeypatch.setenv("ENERGY_FORECAST_SOURCE", FORECAST_SOURCE_OPEN_METEO)
+    assert ForecastConfig.from_env().forecast_source == FORECAST_SOURCE_OPEN_METEO

@@ -18,7 +18,13 @@ import pytest
 from energy_platform.config import BatteryConfig
 from energy_platform.dispatch import baselines
 from energy_platform.dispatch.model import HourInputs
-from energy_platform.dispatch.optimizer import DispatchError, solve_window
+from energy_platform.dispatch.optimizer import (
+    _MIP_GAP_ABS_EUR,
+    _MIP_GAP_REL,
+    DispatchError,
+    _configured_solver,
+    solve_window,
+)
 from energy_platform.dispatch.pricing import WindowPrices, terminal_value_eur_kwh, window_prices
 from energy_platform.tariffs.catalog import TariffSpec
 from tests.dispatch.conftest import BARE_DYNAMIC, FEED_IN, LOSSLESS, ZERO_FEED_IN, make_hours
@@ -171,3 +177,30 @@ def test_an_impossible_battery_is_rejected_by_name(field: str, value: float, mes
 def test_a_dispatch_error_names_the_tariff_and_the_window_length() -> None:
     """Diagnosability: a failed solve says which problem failed, not just that one did."""
     assert issubclass(DispatchError, RuntimeError)
+
+
+def test_the_optimality_bound_is_absolute_not_relative() -> None:
+    """A relative MIP gap is a slack budget that grows with the window. Pin it absolute.
+
+    HiGHS defaults to a *relative* gap of 1e-4. At M6's one-week windows the objective was ~-9 EUR
+    and that bought ~0.9 mEUR of slack -- invisible. At M7's 88-day window the objective reached
+    ~-194 EUR and the same fraction bought ~19 mEUR, so HiGHS stopped, entirely correctly, at a
+    solution costing 2.8 mEUR more than a feasible baseline -- and the warehouse reported it as a
+    violated theorem, which is a confusing way to learn about a solver default.
+
+    This assertion is deliberately *structural* rather than behavioural, and the distinction is
+    worth stating: a unit-scale problem hand-built here closes its gap exactly whether or not the
+    option is set, so a behavioural version of this test passes with the bug present -- it was
+    written, checked against a reverted fix, and thrown away for that reason. The behavioural guard
+    is assert_optimal_never_costs_more_than_naive, which caught this on the seeded warehouse and
+    runs in CI. This one only stops the kwargs being quietly dropped.
+    """
+    assert _MIP_GAP_REL == 0.0, "a non-zero relative gap reintroduces a scale-dependent bound"
+    # Below settlement's own 1e-6 rounding, so a satisfying solve is indistinguishable from exact.
+    assert 0 < _MIP_GAP_ABS_EUR < 1e-6
+
+    solver = _configured_solver()
+    assert getattr(solver, "gapAbs", None) == _MIP_GAP_ABS_EUR
+    assert getattr(solver, "gapRel", None) == _MIP_GAP_REL
+    # Reproducibility on a given machine rides along here; M6's claim depends on it.
+    assert getattr(solver, "threads", None) == 1

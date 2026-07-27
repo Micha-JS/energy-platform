@@ -52,12 +52,23 @@ seeds:
 
 vars:
   # Declared coverage windows (Europe/Berlin, inclusive). The hourly spine is generated from
-  # these ranges -- NOT inferred from min/max of the data -- so the two disjoint seeded windows
+  # these ranges -- NOT inferred from min/max of the data -- so the disjoint seeded windows
   # never manifest a seven-month void between them, and "gap" means "missing within declared
   # coverage". Override for full-history dev, e.g.
   #   dbt build --vars '{coverage_windows: [{start: "2023-01-01", end: "2024-12-31"}]}'
+  #
+  # WINDOWS MUST NOT OVERLAP. int_hourly_spine expands generate_series per window with no UNION,
+  # so an overlap silently doubles every hour in the intersection (assert_no_duplicate_utc_hours
+  # would catch it, but only after every downstream total had already been wrong).
+  #
+  # The spring window was added at M7, which needs a training set: two disjoint DST weeks give a
+  # weekday-seasonal baseline exactly one prior equivalent day. It starts where the March window
+  # ends rather than replacing it, so both original windows stay byte-identical and every number
+  # M5 and M6 published about them stays true -- new rows appear beside them, none change.
+  # Together they cover 2024-03-28..2024-06-30 unbroken.
   coverage_windows:
     - {start: "2024-03-28", end: "2024-04-03"}
+    - {start: "2024-04-04", end: "2024-06-30"}
     - {start: "2024-10-24", end: "2024-10-30"}
 
   # The bidding zone whose day-ahead price the energy mart attaches. 'DE' is the DE-LU

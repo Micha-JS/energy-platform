@@ -10,11 +10,13 @@ from dagster import Definitions, EnvVar
 
 from energy_platform.config import AppConfig
 from energy_platform.orchestration.assets import (
+    forecasting_assets,
     market_data_assets,
     telemetry_assets,
     weather_assets,
 )
 from energy_platform.orchestration.resources import (
+    ForecastPostgresResource,
     HomeAssistantResource,
     OpenMeteoArchiveClientResource,
     OpenMeteoForecastClientResource,
@@ -36,7 +38,7 @@ _config = AppConfig.from_env()
 _coordinates = {site_id: [lat, lon] for site_id, (lat, lon) in _config.site.coordinates.items()}
 
 defs = Definitions(
-    assets=[*market_data_assets, *weather_assets, *telemetry_assets],
+    assets=[*market_data_assets, *weather_assets, *telemetry_assets, *forecasting_assets],
     schedules=[
         daily_market_data_schedule,
         daily_weather_actuals_schedule,
@@ -44,6 +46,12 @@ defs = Definitions(
         daily_telemetry_schedule,
     ],
     resources={
+        "forecast_store": ForecastPostgresResource(
+            dsn=_config.postgres.dsn,
+            derived_schema=_config.postgres.derived_schema,
+            marts_schema=_config.postgres.marts_schema,
+            staging_schema=_config.postgres.staging_schema,
+        ),
         "smard": SmardClientResource(
             base_url=_config.smard.base_url,
             timeout_seconds=_config.smard.timeout_seconds,

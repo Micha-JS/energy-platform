@@ -18,7 +18,13 @@ import httpx
 
 # The archive is requested one Berlin-day window at a time, so every day the M4 CI backfill loads
 # needs its own recorded window: the DST windows and reference day are the shared fixture contract.
-from _fixture_windows import MARCH_WINDOW, NORMAL_DAY, OCTOBER_WINDOW, expand_days
+from _fixture_windows import (
+    MARCH_WINDOW,
+    NORMAL_DAY,
+    OCTOBER_WINDOW,
+    SPRING_WINDOW,
+    expand_days,
+)
 
 # The private helpers are imported deliberately (as the SMARD recorder reuses
 # ``SmardClient._weeks_covering``) so fixtures stay consistent with the client's requests.
@@ -35,7 +41,10 @@ from energy_platform.orchestration.ingest import berlin_day_window
 COORDS = (52.52, 13.40)  # rounded site coordinates -- the only ones in the repo
 FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "connectors" / "fixtures"
 
-DAYS: list[date] = [NORMAL_DAY, *expand_days(MARCH_WINDOW, OCTOBER_WINDOW)]
+# NORMAL_DAY as a one-day span so expand_days dedupes it -- SPRING_WINDOW now contains it.
+DAYS: list[date] = expand_days(
+    (NORMAL_DAY, NORMAL_DAY), MARCH_WINDOW, SPRING_WINDOW, OCTOBER_WINDOW
+)
 FORECAST_DAYS = 7
 PAST_DAYS = 1
 

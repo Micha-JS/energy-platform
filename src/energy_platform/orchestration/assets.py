@@ -19,9 +19,11 @@ from dagster import (
     asset,
 )
 
+from energy_platform.config import AppConfig
 from energy_platform.connectors.open_meteo import WEATHER_VARIABLES
 from energy_platform.connectors.synthetic import TELEMETRY_DATASETS
 from energy_platform.connectors.types import Dataset, Resolution
+from energy_platform.dispatch.windows import load_coverage_windows
 from energy_platform.orchestration.ingest import (
     ingest_forecast_vintage,
     ingest_partition,
@@ -36,6 +38,7 @@ from energy_platform.orchestration.partitions import (
     partition_key_to_date,
 )
 from energy_platform.orchestration.resources import (
+    ForecastPostgresResource,
     HomeAssistantResource,
     OpenMeteoArchiveClientResource,
     OpenMeteoForecastClientResource,
@@ -383,3 +386,89 @@ def fenecon_telemetry_raw(
 # The synthetic asset is the demo/CI path and is scheduled; the real Fenecon asset is defined so
 # a credentialed deployment can materialise it, but stays out of the default schedules.
 telemetry_assets = [synthetic_telemetry_raw, fenecon_telemetry_raw]
+
+
+# -- Forecasting (M7) -------------------------------------------------------------------
+
+
+@asset(
+    name="forecast_backtest_derived",
+    description=(
+        "Backtest the PV and load forecast models over every declared coverage window and "
+        "replace derived.forecast_runs / derived.forecast_predictions. Unpartitioned, because a "
+        "backtest is a property of the whole declared coverage rather than of a day. Reads "
+        "mart_hourly_energy and stg_weather_forecast, so the warehouse must be built first -- the "
+        "dbt -> python -> dbt ordering lives in `just warehouse` and in the CI dbt job, not here: "
+        "Dagster cannot express a dependency on a dbt model this code location does not own."
+    ),
+    group_name="forecasting",
+    kinds={"python", "postgres", "sklearn"},
+)
+def forecast_backtest_derived(
+    context: AssetExecutionContext,
+    forecast_store: ForecastPostgresResource,
+) -> MaterializeResult:
+    # Imported inside the asset for the same reason the CLI does it: the scientific stack costs
+    # real import time and the code location loads on every Dagster process start.
+    from energy_platform.forecasting import runner
+    from energy_platform.forecasting.store import run_payload
+    from energy_platform.forecasting.vintage import PERSISTENCE_RULE_ID, SELECTION_RULE_ID
+
+    config = AppConfig.from_env()
+    site = config.site.default
+    windows = load_coverage_windows()
+
+    runs = predictions = skipped = 0
+    with forecast_store.get_repository() as repo:
+        repo.ensure_schema()  # type: ignore[attr-defined]
+        has_observations, has_vintages = repo.input_relations_exist()  # type: ignore[attr-defined]
+        if not (has_observations and has_vintages):
+            raise RuntimeError(
+                "forecast_backtest_derived needs mart_hourly_energy and stg_weather_forecast; "
+                "run `just dbt-build` (or `just warehouse` for the full sequence) first"
+            )
+        for window in windows:
+            observations = repo.read_observations(window.start, window.end, site.id)  # type: ignore[attr-defined]
+            vintages = repo.read_vintages(  # type: ignore[attr-defined]
+                site.id, config.forecast.forecast_source, window.start, window.end
+            )
+            if not observations:
+                continue
+            for target in runner.TARGETS:
+                result = runner.backtest(
+                    site,
+                    target,
+                    window.start,
+                    window.end,
+                    observations,
+                    vintages,
+                    config=config.forecast,
+                    pv=config.pv,
+                )
+                skipped += len(result.skipped_days)
+                runs += len(result.runs)
+                if result.runs:
+                    counts = repo.replace_window(  # type: ignore[attr-defined]
+                        [
+                            run_payload(
+                                run, config.forecast, SELECTION_RULE_ID, PERSISTENCE_RULE_ID
+                            )
+                            for run in result.runs
+                        ]
+                    )
+                    predictions += counts.predictions
+
+    context.log.info("Backtest complete: runs=%d predictions=%d", runs, predictions)
+    return MaterializeResult(
+        metadata={
+            "runs": runs,
+            "predictions": predictions,
+            "days_without_a_vintage": skipped,
+            "windows": len(windows),
+            "vintage_source": config.forecast.forecast_source,
+            "observation_lag_hours": config.forecast.telemetry_lag_hours,
+        }
+    )
+
+
+forecasting_assets = [forecast_backtest_derived]

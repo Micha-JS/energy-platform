@@ -73,6 +73,39 @@ SOLVER: Final = "highs"
 # not close and is raised rather than repaired.
 _SOLVER_TOLERANCE_KWH: Final = 1e-4
 
+# How close to proven-optimal a solve must get before HiGHS is allowed to stop.
+#
+# HiGHS defaults to a *relative* MIP gap of 1e-4, which is a fixed fraction of the objective and
+# therefore a budget that grows with the window. At M6's one-week windows the objective was around
+# -9 EUR and the gap allowed ~0.9 mEUR of slack -- invisible. M7's 88-day window pushed the
+# objective to -194 EUR, and the same relative gap allowed ~19 mEUR: enough for HiGHS to stop, quite
+# correctly, at a solution costing 2.8 mEUR more than naive_continuous, which
+# assert_optimal_never_costs_more_than_naive then reported as the theorem violation it was.
+#
+# So the gap is stated in *money* instead. 1e-7 EUR is below the 1e-6 rounding of settlement, so a
+# solve that satisfies it cannot be distinguished from an exact optimum by anything downstream, and
+# the bound no longer moves when the window does. The relative gap is pinned to zero so it cannot
+# reintroduce a scale-dependent budget behind this one.
+#
+# This was a latent M6 defect, not an M7 one: it was always wrong to let the optimality bound scale
+# with the window, and a longer window is simply what made it visible.
+_MIP_GAP_ABS_EUR: Final = 1e-7
+_MIP_GAP_REL: Final = 0.0
+
+
+def _configured_solver() -> pulp.LpSolver:
+    """The HiGHS instance every solve uses. One place, so a test can assert on it.
+
+    ``threads=1`` keeps a given machine reproducible; the two gap options keep the optimality bound
+    stated in money rather than as a fraction of the objective -- see the constants above.
+    """
+    return pulp.HiGHS(
+        msg=False,
+        threads=1,
+        gapAbs=_MIP_GAP_ABS_EUR,
+        gapRel=_MIP_GAP_REL,
+    )
+
 
 class DispatchError(RuntimeError):
     """Raised when the solver does not return a proven optimum, naming the status it did return."""
@@ -199,7 +232,7 @@ def solve_raw(
     terminal = terminal_eur_kwh * efficiency
     problem += pulp.lpSum(objective_terms) - terminal * (previous - initial_soc_kwh(battery))
 
-    status = problem.solve(pulp.HiGHS(msg=False, threads=1))
+    status = problem.solve(_configured_solver())
     return RawSolution(
         status=pulp.LpStatus[status],
         objective=pulp.value(problem.objective),

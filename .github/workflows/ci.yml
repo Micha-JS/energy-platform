@@ -100,10 +100,10 @@ jobs:
         run: uv sync --frozen --project dbt
       - name: dbt deps
         run: uv run --project dbt dbt deps --project-dir dbt --profiles-dir dbt
-      - name: Seed raw zone offline (both DST windows + a forecast vintage)
+      - name: Seed raw zone offline (all coverage windows + forecast vintages)
         run: |
           uv run energy-platform backfill --offline \
-            --from 2024-03-28 --to 2024-04-03 --datasets price,load,weather,telemetry
+            --from 2024-03-28 --to 2024-06-30 --datasets price,load,weather,telemetry
           uv run energy-platform backfill --offline \
             --from 2024-10-24 --to 2024-10-30 --datasets price,load,weather,telemetry
           # No --issue-date: offline derives it from the recorded fixture, so the vintage
@@ -111,10 +111,16 @@ jobs:
           # (forecasts accrue forward -- a second requires a second recording), so vintage
           # accrual is asserted by the forecast_vintages_do_not_collapse dbt unit test instead.
           uv run energy-platform forecast-snapshot --offline
+          # Synthetic vintages: the retrospective mirror of the snapshot above, and the only way
+          # the demo has both a forecast and its own outcome in one window. Each stops two days
+          # short of its window's end because a vintage degrades the archive weather for its own
+          # 48-hour horizon, and the fixtures end with the window.
+          uv run energy-platform forecast-backfill --issue-from 2024-03-28 --issue-to 2024-06-28
+          uv run energy-platform forecast-backfill --issue-from 2024-10-24 --issue-to 2024-10-28
       - name: Assert re-seed is a verifiable no-op (idempotency invariant)
         run: |
           out=$(uv run energy-platform backfill --offline \
-            --from 2024-03-28 --to 2024-04-03 --datasets price,load,weather,telemetry 2>&1)
+            --from 2024-03-28 --to 2024-06-30 --datasets price,load,weather,telemetry 2>&1)
           echo "$out"
           echo "$out" | grep -Eq "loaded=0 noop=[0-9]+ revision=0 .* failures=0" \
             || { echo "::error::re-seed was not an all-noop -- ingestion is not idempotent"; exit 1; }
@@ -124,16 +130,26 @@ jobs:
         # `just warehouse` is this same sequence for local use.
         run: |
           uv run --project dbt dbt build --project-dir dbt --profiles-dir dbt \
-            --exclude mart_dispatch_comparison
-      - name: Solve the battery dispatch optimiser over both coverage windows
+            --exclude mart_dispatch_comparison mart_forecast_eval
+      - name: Solve the battery dispatch optimiser over every coverage window
         # Reads mart_hourly_energy, writes the `derived` schema. No network, no solver licence:
         # HiGHS ships as a wheel. Windows come from dbt_project.yml's coverage_windows var, read by
         # the package itself, so CI cannot drift from the declaration the spine is built on.
         run: uv run energy-platform dispatch
-      - name: dbt build (the dispatch mart + its tests)
+      - name: Backtest the forecast models (expanding-window CV)
+        # Reads mart_hourly_energy AND stg_weather_forecast, writes derived.forecast_*. Same
+        # dbt -> python -> dbt sandwich as the optimiser above.
+        #
+        # OMP_NUM_THREADS=1 is load-bearing: HistGradientBoosting accumulates histograms across
+        # threads, so the summation order -- and the last bits of every split -- follow the thread
+        # count. random_state does not cover this; the thread count is the actual lever.
+        env:
+          OMP_NUM_THREADS: "1"
+        run: uv run energy-platform forecast
+      - name: dbt build (the dispatch and forecast marts + their tests)
         run: |
           uv run --project dbt dbt build --project-dir dbt --profiles-dir dbt \
-            --select mart_dispatch_comparison
+            --select mart_dispatch_comparison mart_forecast_eval
       - name: Warehouse guards (no-lookahead + tariff and dispatch reconciliations)
         # All three need a built warehouse, so they run here rather than in `quality`, where they
         # skip. ENERGY_REQUIRE_DBT turns those skips into failures: a reconciliation that silently

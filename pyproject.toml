@@ -20,6 +20,32 @@ dependencies = [
     # Reads the dbt project's declared coverage_windows var, so the optimiser and the hourly spine
     # cannot disagree about which windows exist (see energy_platform.dispatch.windows).
     "pyyaml>=6.0,<7",
+    # M7 forecasting. numpy is already here transitively (highspy, above); these are the first
+    # dependencies that add pandas and scipy -- the cost the M6 note declined to pay for a
+    # one-dimensional time index. Here the array is genuinely two-dimensional (hours x features)
+    # and the alternative is hand-rolling solar geometry and a boosted-tree fit, so the trade goes
+    # the other way. What keeps it honest is that the cost is *contained*:
+    # tests/test_import_containment.py walks the AST of every module under src/energy_platform and
+    # fails if any of these is imported outside forecasting/. The claim that buys is precise --
+    # no FIRST-PARTY module outside forecasting/ touches the scientific stack, so the ingestion path
+    # stays stdlib-only and M3's cross-platform content-hash guarantee is untouched. It is not the
+    # claim that the process is numpy-free; importing energy_platform.cli has loaded numpy via
+    # highspy since M6.
+    #
+    # pvlib for the physical PV model (solar position, POA transposition, cell temperature). Its
+    # h5py/requests tail is unused here but is not separable from the wheel.
+    "pvlib>=0.11,<0.16",
+    # scikit-learn's HistGradientBoostingRegressor rather than LightGBM: it is the same histogram
+    # algorithm, it has loss="quantile" for the p10/p50/p90 pinball reporting and routes NaN down a
+    # learned branch instead of imputing (the "NaN over fabrication" invariant, in the model), and
+    # its wheels vendor their own OpenMP runtime. LightGBM's macOS wheels require `brew install
+    # libomp`, which would make `git clone && just demo` fail on a Mac -- at this data scale its
+    # speed advantage buys nothing in exchange.
+    "scikit-learn>=1.4,<2",
+    # Both ship with scikit-learn, and both are imported directly: joblib to persist artefacts,
+    # threadpoolctl to pin the fit to one thread so a re-fit reproduces on a given machine.
+    "joblib>=1.4,<2",
+    "threadpoolctl>=3.5,<4",
 ]
 
 [project.scripts]
@@ -71,6 +97,14 @@ ignore_missing_imports = true
 # energy_platform.dispatch.optimizer, which hands typed dataclasses back to everything else.
 [[tool.mypy.overrides]]
 module = ["pulp.*"]
+ignore_missing_imports = true
+
+# Neither pvlib nor scikit-learn ships py.typed. Same containment as PuLP, one layer wider: the
+# untyped surface is confined to energy_platform.forecasting, which hands frozen dataclasses back
+# to the CLI, the Dagster asset and the store. tests/test_import_containment.py enforces the
+# boundary rather than trusting it.
+[[tool.mypy.overrides]]
+module = ["pvlib.*", "sklearn.*", "pandas.*", "joblib.*", "threadpoolctl.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
