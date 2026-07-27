@@ -198,16 +198,51 @@ models:
         description: energy_cost_eur - feed_in_revenue_eur. Negative means the window earned money.
       - name: terminal_soc_delta_kwh
         description: >
-          Stored energy at the end of the window less what it started with. Zero for no_battery,
-          which has no store whose level could change.
+          Stored energy at the end of the window less what it started with, as settlement used it.
+          Zero for no_battery, which has no store whose level could change; negative for a window
+          that ends emptier than it started, where the credit is a debit.
+
+          Quantised at 1e-6 kWh rather than the 1 Wh the SoC levels and the schedule use: this is a
+          settlement input the credit is computed *from*, so its quantum lands on the objective the
+          scenarios are ranked by. It is therefore NOT soc_end_kwh - soc_start_kwh recomputed from
+          rounded levels -- that would reproduce the credit only to within a Wh's worth of money.
+        tests: [not_null]
       - name: terminal_value_ct_kwh
         description: >
           What a stored kWh was credited at: the cheapest non-negative import price the window
           offered, a deliberate lower bound. Crediting at the mean instead would make ending the
           window full profitable in itself and the optimiser would hoard.
+
+          This is what a *delivered* kWh is worth. Multiply by terminal_discharge_efficiency to
+          price a stored one -- see terminal_value_eur.
         tests:
           - not_null
           - dbt_utils.accepted_range: {min_value: 0}
+      - name: terminal_discharge_efficiency
+        description: >
+          sqrt(round_trip_efficiency), the factor converting a stored kWh into a delivered one. A
+          kWh in the store can only ever reach the AC node through the discharge leg, so this is
+          what settlement credits it at. Exposed here because the reconstruction recipe under
+          terminal_value_eur is wrong without it -- omitting it overstates the credit by about 5% at
+          the configured battery.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 1}
+      - name: terminal_value_eur
+        description: >
+          The credit for the energy the window ends holding, and the whole of the difference between
+          net_cost_eur and adjusted_net_cost_eur. Exactly reconstructible from the three factors
+          this mart exposes, which is what lets a reader re-value the terminal state without
+          re-solving:
+
+              terminal_value_eur = round(terminal_value_ct_kwh / 100
+                                         * terminal_discharge_efficiency
+                                         * terminal_soc_delta_kwh, 6)
+
+          Substitute any other rate for terminal_value_ct_kwh to get the credit at that valuation.
+          assert_terminal_value_is_reconstructible holds settlement to this identity, so the recipe
+          cannot silently drift from the arithmetic that produced the number.
+        tests: [not_null]
       - name: adjusted_net_cost_eur
         description: >
           net_cost_eur - terminal_value_eur. The optimiser's objective, and the only column the four
@@ -227,12 +262,26 @@ models:
         description: What the battery was worth at all, against a PV-only household.
       - name: savings_vs_naive_continuous_pct
         description: >
-          NULL where the baseline cost nothing or earned money -- a percentage saving off a negative
-          bill is arithmetic dressed up as a result.
+          A fraction, not a percent, despite the suffix. NULL where the baseline cost nothing or
+          earned money -- a percentage saving off a negative bill is arithmetic dressed up as a
+          result.
+
+          NOT capped at 1. An optimum that turns a positive baseline cost into a net credit has
+          saved more than 100% of that cost, which is a result and not a defect -- plausible on a
+          dynamic-tariff week with real arbitrage. Nor is it bounded below in general:
+          naive_telemetered can be arbitrarily worse than naive_continuous, and how much worse is
+          the M3 midnight reset being measured, which is the point of reporting it.
+
+          The one bound that is a theorem holds on the `optimal` row, and is what is tested: the
+          branch already gates on a positive baseline, and naive_continuous is a feasible point of
+          the optimiser's own problem, so the optimum cannot have saved a negative fraction of it.
+          This is the ratio-side gate on optimality; assert_optimal_never_costs_more_than_naive is
+          the same claim in euros.
         tests:
           - dbt_utils.accepted_range:
-              max_value: 1
-              config: {where: "savings_vs_naive_continuous_pct is not null"}
+              min_value: 0
+              config:
+                where: "scenario = 'optimal' and savings_vs_naive_continuous_pct is not null"
       - name: solver
         description: "'highs' for the optimum; 'simulated' or 'telemetered' for the baselines."
         tests: [not_null]

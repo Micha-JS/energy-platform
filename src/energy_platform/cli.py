@@ -19,6 +19,7 @@ justfile and the CI dbt job for the ordering.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -224,10 +225,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         type=date.fromisoformat,
         metavar="YYYY-MM-DD",
-        help="Solve this ad-hoc window instead of the declared ones (requires --to). By default "
-        "every window in dbt/dbt_project.yml's coverage_windows var is solved -- the same "
-        "declaration the hourly spine is built from, read from the same file so the two cannot "
-        "drift.",
+        help="Solve this ad-hoc window instead of the declared ones (requires --to). Reported but "
+        "NOT written to the warehouse -- the derived tables hold the declared windows and nothing "
+        "else. To keep an ad-hoc result, add the window to coverage_windows in "
+        "dbt/dbt_project.yml and re-run without --from/--to; it then becomes persisted, tested "
+        "data. By default every window in that var is solved -- the same declaration the hourly "
+        "spine is built from, read from the same file so the two cannot drift.",
     )
     dispatch.add_argument(
         "--to",
@@ -236,6 +239,15 @@ def _build_parser() -> argparse.ArgumentParser:
         type=date.fromisoformat,
         metavar="YYYY-MM-DD",
         help="Last Europe/Berlin day of the ad-hoc window (inclusive). Requires --from.",
+    )
+    dispatch.add_argument(
+        "--output",
+        default=None,
+        metavar="PATH",
+        type=Path,
+        help="Also write what was solved to PATH as JSON. Scratch output for exploration: no "
+        "schema promise, no stability guarantee, and never read by dbt or by anything else in "
+        "this repo. Use it to keep an ad-hoc run around locally instead of persisting it.",
     )
     dispatch.add_argument(
         "--site",
@@ -488,6 +500,15 @@ def _run_dispatch(args: argparse.Namespace) -> int:
     loudly with the command to run rather than writing an empty result. Each (window, site, tariff)
     is committed on its own, so an interrupted run leaves completed windows persisted and a re-run
     simply redoes the rest.
+
+    An ad-hoc ``--from/--to`` window is solved and reported but **never written**. The derived zone
+    holds the declared coverage windows and nothing else, which is what lets
+    ``assert_dispatch_windows_are_declared`` treat any other window as stale output rather than
+    having to tell exploration apart from record. Persisting one would be permanent: the
+    replace-write only ever deletes the key it is about to write, so an ad-hoc row would fail that
+    test on every later build with no command that removes it. A solve costs milliseconds, so
+    nothing is lost by re-deriving; if a window turns out to be worth keeping, declaring it in
+    ``coverage_windows`` makes it first-class rather than smuggled in.
     """
     config = AppConfig.from_env()
     try:
@@ -495,6 +516,14 @@ def _run_dispatch(args: argparse.Namespace) -> int:
         specs, feed_in = _dispatch_tariffs(args, config)
     except (ValueError, KeyError, FileNotFoundError) as exc:
         raise SystemExit(str(exc)) from exc
+
+    ad_hoc = args.from_date is not None
+    if ad_hoc:
+        logger.info(
+            "AD-HOC WINDOW -- solved and reported, NOT persisted. Add it to coverage_windows in "
+            "dbt/dbt_project.yml and re-run without --from/--to to persist it%s.",
+            "" if args.output else "; --output PATH keeps a local copy",
+        )
 
     logger.info(
         "Optimising %d window(s) %s for %d tariff(s) %s against battery %.1f kWh / %.1f kW / "
@@ -511,6 +540,7 @@ def _run_dispatch(args: argparse.Namespace) -> int:
     solved = 0
     failures = 0
     version = solver_version()
+    collected: list[tuple[runner.WindowSolution, str]] = []
 
     with psycopg.connect(config.postgres.dsn) as conn:
         repo = DispatchRepository(
@@ -518,7 +548,10 @@ def _run_dispatch(args: argparse.Namespace) -> int:
             derived_schema=config.postgres.derived_schema,
             marts_schema=config.postgres.marts_schema,
         )
-        repo.ensure_schema()
+        # Not for an ad-hoc run: exploring must not create a derived zone as a side effect, and
+        # nothing here is going to write to one.
+        if not ad_hoc:
+            repo.ensure_schema()
         if not repo.input_relation_exists():
             raise SystemExit(
                 f"{config.postgres.marts_schema}.mart_hourly_energy does not exist; run "
@@ -539,7 +572,10 @@ def _run_dispatch(args: argparse.Namespace) -> int:
                         solution = runner.solve(
                             window, region, hours, spec, feed_in, config.battery
                         )
-                        counts = repo.replace_window(solution, config.battery, version)
+                        replaced = False
+                        if not ad_hoc:
+                            counts = repo.replace_window(solution, config.battery, version)
+                            replaced = counts.replaced > 0
                     except (DispatchError, DispatchInputError):
                         failures += 1
                         logger.exception(
@@ -547,9 +583,20 @@ def _run_dispatch(args: argparse.Namespace) -> int:
                         )
                         continue
                     solved += 1
-                    _log_solution(window, region, solution, counts.replaced > 0)
+                    collected.append((solution, version))
+                    _log_solution(window, region, solution, replaced)
 
-    logger.info("Done. solved=%d failures=%d solver=highs/%s", solved, failures, version)
+    if args.output is not None:
+        _write_dispatch_json(args.output, collected, ad_hoc=ad_hoc)
+        logger.info("Wrote %d solve(s) to %s", len(collected), args.output)
+
+    logger.info(
+        "Done. solved=%d failures=%d solver=highs/%s%s",
+        solved,
+        failures,
+        version,
+        " (nothing persisted -- ad-hoc window)" if ad_hoc else "",
+    )
     return 1 if failures else 0
 
 
@@ -577,8 +624,79 @@ def _log_solution(
     )
 
 
+def _write_dispatch_json(
+    path: Path, collected: Sequence[tuple[runner.WindowSolution, str]], *, ad_hoc: bool
+) -> None:
+    """Dump what was solved to a file. Scratch output, and the header says so.
+
+    Deliberately not a second persistence format: nothing in this repo reads it, it carries no
+    schema and no stability promise, and it exists so that keeping an exploration around never
+    requires writing one into the warehouse. Written once at the end rather than incrementally, so
+    a run that dies part-way leaves no half-file to be mistaken for a whole one.
+    """
+    payload = {
+        "note": (
+            "Scratch output from `energy-platform dispatch`. No schema promise, not read by dbt "
+            "or anything else. The warehouse holds only declared coverage windows."
+        ),
+        "persisted": not ad_hoc,
+        "solves": [
+            {
+                "window_start": solution.window.start.isoformat(),
+                "window_end": solution.window.end.isoformat(),
+                "region": solution.region,
+                "tariff_id": solution.tariff_id,
+                "solver_version": version,
+                "expected_hours": solution.expected_hours,
+                "terminal_value_ct_kwh": solution.terminal_value_eur_kwh * 100.0,
+                "scenarios": [
+                    {
+                        "scenario": result.scenario.value,
+                        "solver": result.solver,
+                        "status": result.status,
+                        "energy_cost_eur": result.energy_cost_eur,
+                        "feed_in_revenue_eur": result.feed_in_revenue_eur,
+                        "net_cost_eur": result.net_cost_eur,
+                        "terminal_soc_delta_kwh": result.terminal_soc_delta_kwh,
+                        "terminal_discharge_efficiency": result.terminal_discharge_efficiency,
+                        "terminal_value_eur": result.terminal_value_eur,
+                        "adjusted_net_cost_eur": result.objective_eur,
+                        "battery_charge_kwh": result.battery_charge_kwh,
+                        "battery_discharge_kwh": result.battery_discharge_kwh,
+                        "priced_hours": result.priced_hours,
+                        "hours": [
+                            {
+                                "ts_utc": hour.ts_utc.isoformat(),
+                                "pv_production_kwh": hour.pv_production_kwh,
+                                "household_load_kwh": hour.household_load_kwh,
+                                "battery_charge_kwh": hour.battery_charge_kwh,
+                                "battery_discharge_kwh": hour.battery_discharge_kwh,
+                                "soc_kwh": hour.soc_kwh,
+                                "grid_import_kwh": hour.grid_import_kwh,
+                                "grid_export_kwh": hour.grid_export_kwh,
+                                "import_price_ct_kwh": hour.import_price_ct_kwh,
+                                "energy_cost_eur": hour.energy_cost_eur,
+                                "feed_in_revenue_eur": hour.feed_in_revenue_eur,
+                                "is_priced": hour.is_priced,
+                            }
+                            for hour in result.hours
+                        ],
+                    }
+                    for result in solution.results
+                ],
+            }
+            for solution, version in collected
+        ],
+    }
+    path.write_text(json.dumps(payload, indent=2) + "\n")
+
+
 def _dispatch_windows(args: argparse.Namespace) -> tuple[CoverageWindow, ...]:
-    """The windows to solve: an explicit ad-hoc range, or every one the dbt project declares."""
+    """The windows to solve: an explicit ad-hoc range, or every one the dbt project declares.
+
+    Whether the result is persisted is decided by the caller from the same ``--from`` flag, not
+    carried out of here: this stays a pure function of the arguments.
+    """
     if (args.from_date is None) != (args.to_date is None):
         raise ValueError("--from and --to must be given together, or neither")
     if args.from_date is not None and args.to_date is not None:

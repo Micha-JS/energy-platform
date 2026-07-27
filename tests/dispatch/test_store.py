@@ -26,6 +26,7 @@ from energy_platform.dispatch.store import (
     DispatchRepository,
 )
 from energy_platform.dispatch.windows import CoverageWindow
+from energy_platform.rows import as_required_float
 from energy_platform.tariffs.catalog import load_catalog
 
 pytestmark = pytest.mark.postgres
@@ -128,11 +129,6 @@ def _solve(repo: DispatchRepository, tariff_id: str = "dynamic_2024") -> runner.
     catalog = load_catalog()
     hours = repo.read_window(WINDOW, REGION)
     return runner.solve(WINDOW, REGION, hours, catalog[tariff_id], catalog["eeg_2024"], BATTERY)
-
-
-def _as_float(value: object) -> float:
-    assert isinstance(value, int | float | str)
-    return float(value)
 
 
 def _count(conn: psycopg.Connection[tuple[object, ...]], table: str) -> int:
@@ -266,7 +262,7 @@ def test_the_persisted_values_reproduce_the_result_they_came_from(
                 sql.Identifier(DERIVED_SCHEMA)
             )
         )
-        persisted = {str(row[0]): _as_float(row[1]) for row in cur.fetchall()}
+        persisted = {str(row[0]): as_required_float(row[1]) for row in cur.fetchall()}
 
     assert persisted == pytest.approx(expected)
 

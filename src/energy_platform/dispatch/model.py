@@ -29,6 +29,15 @@ from typing import Final
 # precision the solver does not have. Energy uses M3's 1 Wh quantum (see ``connectors.synthetic``).
 _EUR_DP: Final = 6
 
+# The terminal SoC delta is quantised finer than the 1 Wh the meter reports, because it is a
+# settlement *input* rather than a meter reading: the credit is computed from the quantised value,
+# so the quantum lands directly on the objective the scenarios are ranked by. A 1 Wh quantum times a
+# ~0.4 EUR/kWh terminal rate is ~2e-4 EUR of noise per scenario -- two orders of magnitude above the
+# money quantum below, and enough to swallow the tolerance in
+# assert_optimal_never_costs_more_than_naive. 1e-6 kWh keeps it at ~2e-7 EUR, under one _EUR_DP
+# step.
+_SOC_DELTA_DP: Final = 6
+
 
 class Scenario(StrEnum):
     """The four dispatches M6 compares, per coverage window and consumption tariff.
@@ -127,10 +136,19 @@ class DispatchResult:
     energy it started with. Without that term, hindsight optimisation drains the battery to
     ``soc_min`` on the last evening and books the proceeds as savings; with it, energy left in the
     battery is worth what it can deliver, so ending full and ending empty are compared honestly.
-    ``net_cost_eur`` is kept alongside, and ``soc_end_kwh`` and ``terminal_value_eur_kwh`` beside
-    it, so the adjustment can be undone or recomputed at a different valuation.
-    See :func:`energy_platform.dispatch.pricing.terminal_value_eur_kwh` for how the rate is chosen
-    and which way its bias runs.
+    ``net_cost_eur`` is kept alongside, and the three factors the credit is made of beside it, so
+    the adjustment can be undone or recomputed at a different valuation without re-solving::
+
+        terminal_value_eur == round_eur(
+            terminal_value_eur_kwh * terminal_discharge_efficiency * terminal_soc_delta_kwh
+        )
+
+    The delta is a field rather than ``soc_end_kwh - soc_start_kwh`` because those two are persisted
+    at the 1 Wh meter quantum while the credit is not: deriving the delta from them would leave the
+    documented recipe reproducing the credit only approximately, which is the drift this identity
+    exists to prevent. See :func:`energy_platform.dispatch.pricing.terminal_value_eur_kwh` for how
+    the rate is chosen and which way its bias runs, and
+    :func:`energy_platform.dispatch.pricing.settle_window` for why the efficiency factor is there.
     """
 
     scenario: Scenario
@@ -138,7 +156,9 @@ class DispatchResult:
     hours: tuple[DispatchHour, ...]
     soc_start_kwh: float
     soc_end_kwh: float
+    terminal_soc_delta_kwh: float
     terminal_value_eur_kwh: float
+    terminal_discharge_efficiency: float
     terminal_value_eur: float
     energy_cost_eur: float
     feed_in_revenue_eur: float
@@ -166,4 +186,14 @@ def round_eur(value: float | None) -> float | None:
     if value is None:
         return None
     rounded = round(value, _EUR_DP)
+    return rounded if rounded != 0 else 0.0
+
+
+def round_soc_delta_kwh(value: float) -> float:
+    """Quantise the terminal SoC delta, the one energy figure settlement multiplies money by.
+
+    Separate from the 1 Wh quantum the schedule and the SoC levels use, and finer -- see
+    ``_SOC_DELTA_DP``. ``-0.0`` is normalised for the same reason :func:`round_eur` does it.
+    """
+    rounded = round(value, _SOC_DELTA_DP)
     return rounded if rounded != 0 else 0.0

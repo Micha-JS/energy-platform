@@ -28,8 +28,18 @@
 -- optimiser minimises: net cost less the value of the energy still in the battery at the end.
 -- Without that term hindsight optimisation drains the battery on the last evening and books the
 -- proceeds as savings, which is an artefact of where the window stops. The adjustment is fully
--- exposed -- terminal_soc_delta_kwh, terminal_value_ct_kwh, terminal_value_eur -- so it can be
--- undone or recomputed at any other valuation without re-solving.
+-- exposed, and exactly reconstructible from the columns here:
+--
+--     terminal_value_eur = round(terminal_value_ct_kwh / 100
+--                                * terminal_discharge_efficiency
+--                                * terminal_soc_delta_kwh, 6)
+--
+-- so it can be undone (add it back to adjusted_net_cost_eur and net_cost_eur is what you get) or
+-- recomputed at any other valuation by substituting a rate for terminal_value_ct_kwh, without
+-- re-solving. terminal_discharge_efficiency is sqrt(round_trip_efficiency): a kWh in the store can
+-- only ever reach the AC node through the discharge leg, so that is what it is worth, and it is in
+-- this mart rather than left in the derived zone's battery jsonb precisely because the recipe above
+-- is wrong without it -- omitting it overstates the credit by about 5% at the configured battery.
 --
 -- ENERGY COST ONLY: no standing charge. The Grundpreis is identical in all four scenarios and
 -- cancels out of every savings figure, and a week is not a bill. mart_tariff_counterfactuals is
@@ -58,8 +68,8 @@ runs as (
         r.solver,
         r.status                                  as solver_status,
         r.terminal_value_ct_kwh,
-        r.soc_start_kwh,
-        r.soc_end_kwh,
+        r.terminal_soc_delta_kwh,
+        r.terminal_discharge_efficiency,
         r.energy_cost_eur,
         r.feed_in_revenue_eur,
         r.net_cost_eur,
@@ -107,11 +117,17 @@ select
     feed_in_revenue_eur,
     net_cost_eur,
 
-    -- What the window ended holding, relative to what it started with, and what that is worth.
-    -- Zero for no_battery, which has no store whose level could change -- so its adjusted cost and
-    -- its net cost are the same number, and the adjustment cannot flatter it.
-    soc_end_kwh - soc_start_kwh                   as terminal_soc_delta_kwh,
+    -- What the window ended holding, relative to what it started with, and what that is worth. Zero
+    -- for no_battery, which has no store whose level could change -- so its adjusted cost and its
+    -- net cost are the same number, and the adjustment cannot flatter it.
+    --
+    -- The delta is the settled figure, not soc_end_kwh - soc_start_kwh: those two are persisted at
+    -- the 1 Wh meter quantum, and subtracting them would leave the header's recipe reproducing
+    -- terminal_value_eur only to within a Wh's worth of credit. The singular test
+    -- assert_terminal_value_is_reconstructible holds all three factors to their product.
+    terminal_soc_delta_kwh,
     terminal_value_ct_kwh,
+    terminal_discharge_efficiency,
     terminal_value_eur,
     adjusted_net_cost_eur,
 

@@ -28,6 +28,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from energy_platform.rows import as_float
 from energy_platform.tariffs.catalog import TariffKind, TariffSpec, load_catalog
 from energy_platform.tariffs.engine import (
     energy_cost_eur,
@@ -103,8 +104,8 @@ def test_import_price_matches_the_python_engine(
     """The per-kWh rate: where a factor-of-ten or a VAT slip shows up first."""
     for row in cost_rows:
         spec = catalog[row["tariff_id"]]
-        expected = import_price_ct_kwh(spec, _float(row["price_eur_mwh"]))
-        actual = _float(row["import_price_ct_kwh"])
+        expected = import_price_ct_kwh(spec, as_float(row["price_eur_mwh"]))
+        actual = as_float(row["import_price_ct_kwh"])
         assert actual == pytest.approx(expected, abs=TOLERANCE_EUR, nan_ok=False), (
             f"import price diverged at {row['ts_utc']} {row['region']} "
             f"{row['scenario']} {row['tariff_id']}: SQL {actual}, Python {expected}"
@@ -117,9 +118,9 @@ def test_energy_cost_matches_the_python_engine(
     for row in cost_rows:
         spec = catalog[row["tariff_id"]]
         expected = energy_cost_eur(
-            spec, _float(row["grid_import_kwh"]), _float(row["price_eur_mwh"])
+            spec, as_float(row["grid_import_kwh"]), as_float(row["price_eur_mwh"])
         )
-        actual = _float(row["energy_cost_eur"])
+        actual = as_float(row["energy_cost_eur"])
         assert actual == pytest.approx(expected, abs=TOLERANCE_EUR, nan_ok=False), (
             f"energy cost diverged at {row['ts_utc']} {row['region']} "
             f"{row['scenario']} {row['tariff_id']}: SQL {actual}, Python {expected}"
@@ -132,8 +133,8 @@ def test_feed_in_revenue_matches_the_python_engine(
     """Also pins that the warehouse used the flat rate and not the spot price."""
     spec = _feed_in_spec(catalog)
     for row in cost_rows:
-        expected = feed_in_revenue_eur(spec, _float(row["grid_export_kwh"]))
-        actual = _float(row["feed_in_revenue_eur"])
+        expected = feed_in_revenue_eur(spec, as_float(row["grid_export_kwh"]))
+        actual = as_float(row["feed_in_revenue_eur"])
         assert actual == pytest.approx(expected, abs=TOLERANCE_EUR, nan_ok=False), (
             f"feed-in revenue diverged at {row['ts_utc']} {row['region']} "
             f"{row['scenario']} {row['tariff_id']}: SQL {actual}, Python {expected}"
@@ -156,11 +157,3 @@ def test_unpriced_hours_have_no_money_on_either_side(cost_rows: list[dict[str, A
                 f"{row['ts_utc']} {row['tariff_id']} is marked unpriced but carries a full "
                 "set of money columns"
             )
-
-
-def _float(value: object) -> float | None:
-    """Narrow a psycopg value to ``float | None`` -- numeric columns arrive as Decimal."""
-    if value is None:
-        return None
-    assert isinstance(value, int | float | str)
-    return float(value)

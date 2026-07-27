@@ -26,6 +26,7 @@ from energy_platform.dispatch.model import (
     HourInputs,
     Scenario,
     round_eur,
+    round_soc_delta_kwh,
 )
 from energy_platform.tariffs.catalog import TariffKind, TariffSpec
 from energy_platform.tariffs.engine import CT_PER_EUR, import_price_ct_kwh
@@ -202,9 +203,12 @@ def settle_window(
     #     objective_eur == net_cost_eur - terminal_value_eur
     settled_cost = _settled(energy_cost)
     settled_revenue = _settled(feed_in_revenue)
-    settled_terminal = _settled(
-        terminal_eur_kwh * discharge_efficiency * (soc_end_kwh - soc_start_kwh)
-    )
+    # Quantise the delta first, then price *that* value -- not the unrounded difference. The three
+    # factors are persisted and the marts document the credit as their product, so computing the
+    # money from an intermediate no reader can see would leave the documented recipe reproducing it
+    # only approximately. See ``model._SOC_DELTA_DP`` for why this quantum is finer than 1 Wh.
+    terminal_delta = round_soc_delta_kwh(soc_end_kwh - soc_start_kwh)
+    settled_terminal = _settled(terminal_eur_kwh * discharge_efficiency * terminal_delta)
     net_cost = settled_cost - settled_revenue
     return DispatchResult(
         scenario=scenario,
@@ -212,7 +216,9 @@ def settle_window(
         hours=tuple(rows),
         soc_start_kwh=soc_start_kwh,
         soc_end_kwh=soc_end_kwh,
+        terminal_soc_delta_kwh=terminal_delta,
         terminal_value_eur_kwh=terminal_eur_kwh,
+        terminal_discharge_efficiency=discharge_efficiency,
         terminal_value_eur=settled_terminal,
         energy_cost_eur=settled_cost,
         feed_in_revenue_eur=settled_revenue,

@@ -21,3 +21,44 @@ unit_tests:
     expect:
       rows:
         - {source: "smard", dataset: "day_ahead_price", region: "DE", resolution: "hour", expected_hours: 24, present_hours: 0, gap_hours: 24, null_count: 0}
+
+  # The two shapes the seeded windows do not contain, and which no test over real data can therefore
+  # reach: a window that ends emptier than it started, so the terminal "credit" is a debit; and an
+  # optimum that turns a positive baseline cost into a net credit, saving more than 100% of it.
+  # Mocked because provoking either from the seed would mean tuning the data to produce a result,
+  # which is the seed serving the test rather than the other way round.
+  #
+  # This pins the mart's plumbing: that terminal_soc_delta_kwh and terminal_discharge_efficiency
+  # reach the surface as settlement produced them rather than being recomputed from the rounded SoC
+  # levels or dropped, and that neither a negative delta nor a saving above 1 is clamped anywhere.
+  # That settlement's own three factors multiply out to its credit is a claim about real data and
+  # lives in assert_terminal_value_is_reconstructible.
+  #
+  # The window must be one dbt_project.yml declares: the model inner-joins declared_coverage_windows(),
+  # which reads the var and cannot be mocked, so an undeclared window would leave no rows at all and
+  # the test would pass by silence.
+  - name: terminal_adjustment_and_savings_survive_the_edge_cases
+    model: mart_dispatch_comparison
+    description: >
+      terminal_value_eur here is the settled product of the three factors beside it,
+      round(ct/100 * sqrt(0.9) * delta, 6), and objective_eur is net_cost_eur less that credit --
+      so the fixture is a coherent settlement and not just plausible numbers.
+    given:
+      - input: source('derived', 'dispatch_runs')
+        rows:
+          # Ends 4 kWh fuller than it started. The optimum turned a 10.00 EUR baseline bill into a
+          # 2.50 EUR credit: it saved 12.50, or 125% of the baseline. Correct data, and exactly what
+          # a max_value of 1 on savings_vs_naive_continuous_pct used to fail on.
+          - {window_start: "2024-03-28", window_end: "2024-04-03", region: "site_a", tariff_id: "dynamic_2024", scenario: "optimal", solver: "highs", status: "Optimal", terminal_value_ct_kwh: 20.0, terminal_soc_delta_kwh: 4.0, terminal_discharge_efficiency: 0.9486832980505138, energy_cost_eur: 5.0, feed_in_revenue_eur: 6.741053, net_cost_eur: -1.741053, terminal_value_eur: 0.758947, objective_eur: -2.5, battery_charge_kwh: 20.0, battery_discharge_kwh: 18.0, priced_hours: 167}
+          - {window_start: "2024-03-28", window_end: "2024-04-03", region: "site_a", tariff_id: "dynamic_2024", scenario: "naive_continuous", solver: "simulated", status: "Simulated", terminal_value_ct_kwh: 20.0, terminal_soc_delta_kwh: 1.5, terminal_discharge_efficiency: 0.9486832980505138, energy_cost_eur: 12.0, feed_in_revenue_eur: 1.715395, net_cost_eur: 10.284605, terminal_value_eur: 0.284605, objective_eur: 10.0, battery_charge_kwh: 10.0, battery_discharge_kwh: 9.0, priced_hours: 167}
+          # Ends 2.25 kWh emptier: the credit is negative, so the adjusted cost is *higher* than the
+          # net cost. A clamp, an abs(), or a greatest(0, ...) anywhere fails here.
+          - {window_start: "2024-03-28", window_end: "2024-04-03", region: "site_a", tariff_id: "dynamic_2024", scenario: "naive_telemetered", solver: "telemetered", status: "Simulated", terminal_value_ct_kwh: 20.0, terminal_soc_delta_kwh: -2.25, terminal_discharge_efficiency: 0.9486832980505138, energy_cost_eur: 13.0, feed_in_revenue_eur: 0.926907, net_cost_eur: 12.073093, terminal_value_eur: -0.426907, objective_eur: 12.5, battery_charge_kwh: 12.0, battery_discharge_kwh: 5.0, priced_hours: 167}
+          # No store whose level could change, so the adjustment cannot flatter it.
+          - {window_start: "2024-03-28", window_end: "2024-04-03", region: "site_a", tariff_id: "dynamic_2024", scenario: "no_battery", solver: "simulated", status: "Simulated", terminal_value_ct_kwh: 20.0, terminal_soc_delta_kwh: 0.0, terminal_discharge_efficiency: 0.9486832980505138, energy_cost_eur: 16.0, feed_in_revenue_eur: 1.0, net_cost_eur: 15.0, terminal_value_eur: 0.0, objective_eur: 15.0, battery_charge_kwh: 0.0, battery_discharge_kwh: 0.0, priced_hours: 167}
+    expect:
+      rows:
+        - {scenario: "optimal", terminal_soc_delta_kwh: 4.0, terminal_discharge_efficiency: 0.9486832980505138, terminal_value_eur: 0.758947, adjusted_net_cost_eur: -2.5, battery_unreturned_kwh: 2.0, savings_vs_naive_continuous_eur: 12.5, savings_vs_naive_continuous_pct: 1.25}
+        - {scenario: "naive_continuous", terminal_soc_delta_kwh: 1.5, terminal_discharge_efficiency: 0.9486832980505138, terminal_value_eur: 0.284605, adjusted_net_cost_eur: 10.0, battery_unreturned_kwh: 1.0, savings_vs_naive_continuous_eur: 0.0, savings_vs_naive_continuous_pct: 0.0}
+        - {scenario: "naive_telemetered", terminal_soc_delta_kwh: -2.25, terminal_discharge_efficiency: 0.9486832980505138, terminal_value_eur: -0.426907, adjusted_net_cost_eur: 12.5, battery_unreturned_kwh: 7.0, savings_vs_naive_continuous_eur: -2.5, savings_vs_naive_continuous_pct: -0.25}
+        - {scenario: "no_battery", terminal_soc_delta_kwh: 0.0, terminal_discharge_efficiency: 0.9486832980505138, terminal_value_eur: 0.0, adjusted_net_cost_eur: 15.0, battery_unreturned_kwh: 0.0, savings_vs_naive_continuous_eur: -5.0, savings_vs_naive_continuous_pct: -0.5}

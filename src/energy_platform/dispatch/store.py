@@ -44,6 +44,7 @@ from energy_platform.config import BatteryConfig
 from energy_platform.dispatch.model import DispatchResult, HourInputs, round_eur
 from energy_platform.dispatch.runner import WindowSolution
 from energy_platform.dispatch.windows import CoverageWindow
+from energy_platform.rows import as_float
 
 # The mart the optimiser reads. A dbt table, not the raw zone: DST-correct calendar columns, the
 # declared spine, and the price join by explicit bidding zone all live in the dbt layer, and
@@ -72,6 +73,14 @@ def _ddl(schema: str) -> list[sql.Composed]:
                 solver_version          text        NOT NULL,
                 status                  text        NOT NULL,
                 terminal_value_ct_kwh   double precision NOT NULL,
+                -- The other two factors of the terminal credit. Nullable, and deliberately so:
+                -- they were added after the table existed, the ALTER below is what puts them on an
+                -- existing one, and a NOT NULL ALTER cannot run against rows that predate them. The
+                -- not-nullness is asserted where it is observable -- as tests on
+                -- mart_dispatch_comparison -- and is transient by construction, because one
+                -- `just dispatch` replace-writes every declared window.
+                terminal_soc_delta_kwh        double precision,
+                terminal_discharge_efficiency double precision,
                 soc_start_kwh           double precision NOT NULL,
                 soc_end_kwh             double precision NOT NULL,
                 energy_cost_eur         double precision NOT NULL,
@@ -87,6 +96,16 @@ def _ddl(schema: str) -> list[sql.Composed]:
                 input_digest            text        NOT NULL,
                 solved_at               timestamptz NOT NULL DEFAULT now()
             )
+            """
+        ).format(schema=ident),
+        # Migration for a table created before these two columns existed. `CREATE TABLE IF NOT
+        # EXISTS` above is a no-op on an existing table, so without these a pre-change derived zone
+        # would keep failing the mart's not_null tests with no way forward short of dropping it.
+        sql.SQL(
+            """
+            ALTER TABLE {schema}.dispatch_runs
+                ADD COLUMN IF NOT EXISTS terminal_soc_delta_kwh double precision,
+                ADD COLUMN IF NOT EXISTS terminal_discharge_efficiency double precision
             """
         ).format(schema=ident),
         # One row per scenario per (site, window, tariff). UNIQUE rather than a plain index: the
@@ -200,14 +219,14 @@ class DispatchRepository:
         hours = tuple(
             HourInputs(
                 ts_utc=_as_datetime(row[0]),
-                pv_production_kwh=_as_float(row[1]),
-                household_load_kwh=_as_float(row[2]),
-                price_eur_mwh=_as_float(row[3]),
-                battery_charge_kwh=_as_float(row[4]),
-                battery_discharge_kwh=_as_float(row[5]),
-                grid_import_kwh=_as_float(row[6]),
-                grid_export_kwh=_as_float(row[7]),
-                soc_frac=_as_float(row[8]),
+                pv_production_kwh=as_float(row[1]),
+                household_load_kwh=as_float(row[2]),
+                price_eur_mwh=as_float(row[3]),
+                battery_charge_kwh=as_float(row[4]),
+                battery_discharge_kwh=as_float(row[5]),
+                grid_import_kwh=as_float(row[6]),
+                grid_export_kwh=as_float(row[7]),
+                soc_frac=as_float(row[8]),
             )
             for row in rows
         )
@@ -282,6 +301,7 @@ class DispatchRepository:
                 INSERT INTO {schema}.dispatch_runs (
                     region, window_start, window_end, tariff_id, scenario,
                     solver, solver_version, status, terminal_value_ct_kwh,
+                    terminal_soc_delta_kwh, terminal_discharge_efficiency,
                     soc_start_kwh, soc_end_kwh,
                     energy_cost_eur, feed_in_revenue_eur, net_cost_eur,
                     terminal_value_eur, objective_eur,
@@ -289,7 +309,7 @@ class DispatchRepository:
                     priced_hours, expected_hours, battery, input_digest
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s)
+                        %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """
             ).format(schema=sql.Identifier(self._derived)),
@@ -303,6 +323,10 @@ class DispatchRepository:
                 solver_version,
                 result.status,
                 solution.terminal_value_eur_kwh * 100.0,
+                # Both written verbatim: settlement already quantised the delta, and re-rounding
+                # either here would break the identity the mart documents.
+                result.terminal_soc_delta_kwh,
+                result.terminal_discharge_efficiency,
                 _kwh(result.soc_start_kwh),
                 _kwh(result.soc_end_kwh),
                 result.energy_cost_eur,
@@ -424,14 +448,6 @@ def _kwh(value: float | None) -> float | None:
         return None
     rounded = round(value, 3)
     return rounded if rounded != 0 else 0.0
-
-
-def _as_float(value: object) -> float | None:
-    """Narrow a psycopg value to ``float | None`` -- numeric columns arrive as Decimal."""
-    if value is None:
-        return None
-    assert isinstance(value, int | float | str)
-    return float(value)
 
 
 def _as_datetime(value: object) -> datetime:
