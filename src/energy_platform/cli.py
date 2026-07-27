@@ -9,6 +9,11 @@ independently, so an interrupted run simply continues on retry).
 ``energy-platform forecast-snapshot`` captures *today's* Open-Meteo forecast as one immutable
 vintage. Forecasts are never backfillable -- the API only serves the current issue -- so this
 command has no date range; the daily Dagster schedule is the primary accrual path.
+
+``energy-platform dispatch`` solves the M6 battery optimiser over each declared coverage window and
+writes the four scenarios to the derived zone. Unlike the two above it reads a *mart* rather than
+the raw zone, so it runs after ``dbt build`` and before the dispatch mart is built -- see the
+justfile and the CI dbt job for the ordering.
 """
 
 from __future__ import annotations
@@ -46,6 +51,10 @@ from energy_platform.connectors.synthetic import (
     SyntheticTelemetryClient,
 )
 from energy_platform.connectors.types import Dataset, Resolution
+from energy_platform.dispatch import runner
+from energy_platform.dispatch.optimizer import DispatchError, solver_version
+from energy_platform.dispatch.store import DispatchInputError, DispatchRepository
+from energy_platform.dispatch.windows import CoverageWindow, load_coverage_windows
 from energy_platform.orchestration.ingest import (
     IngestResult,
     WeatherDependencyError,
@@ -55,6 +64,7 @@ from energy_platform.orchestration.ingest import (
 )
 from energy_platform.orchestration.partition_config import PARTITION_TIMEZONE
 from energy_platform.orchestration.raw_zone import RawZoneRepository, WriteOutcome
+from energy_platform.tariffs.catalog import TariffSpec, load_catalog, resolve
 
 logger = logging.getLogger("energy_platform.backfill")
 
@@ -127,6 +137,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_backfill(args)
     if args.command == "forecast-snapshot":
         return _run_forecast_snapshot(args)
+    if args.command == "dispatch":
+        return _run_dispatch(args)
     parser.print_help()
     return 1
 
@@ -201,6 +213,42 @@ def _build_parser() -> argparse.ArgumentParser:
         "--offline, the issue date the recorded fixture actually represents.",
     )
     _add_offline_args(snapshot)
+
+    dispatch = sub.add_parser(
+        "dispatch",
+        help="Solve the battery dispatch optimiser over the declared coverage windows.",
+    )
+    dispatch.add_argument(
+        "--from",
+        dest="from_date",
+        default=None,
+        type=date.fromisoformat,
+        metavar="YYYY-MM-DD",
+        help="Solve this ad-hoc window instead of the declared ones (requires --to). By default "
+        "every window in dbt/dbt_project.yml's coverage_windows var is solved -- the same "
+        "declaration the hourly spine is built from, read from the same file so the two cannot "
+        "drift.",
+    )
+    dispatch.add_argument(
+        "--to",
+        dest="to_date",
+        default=None,
+        type=date.fromisoformat,
+        metavar="YYYY-MM-DD",
+        help="Last Europe/Berlin day of the ad-hoc window (inclusive). Requires --from.",
+    )
+    dispatch.add_argument(
+        "--site",
+        default=None,
+        help="Site id to solve for (default: every site the energy mart holds in the window).",
+    )
+    dispatch.add_argument(
+        "--tariff",
+        dest="tariffs",
+        default=None,
+        help="Comma-separated consumption tariff ids (default: every static/dynamic row in the "
+        "catalogue).",
+    )
     return parser
 
 
@@ -431,6 +479,137 @@ def _run_forecast_snapshot(args: argparse.Namespace) -> int:
         result.horizon_days,
     )
     return 0
+
+
+def _run_dispatch(args: argparse.Namespace) -> int:
+    """Solve every (window, site, tariff) and replace its rows in the derived zone.
+
+    Reads ``mart_hourly_energy``, so the warehouse must be built first -- a missing mart fails
+    loudly with the command to run rather than writing an empty result. Each (window, site, tariff)
+    is committed on its own, so an interrupted run leaves completed windows persisted and a re-run
+    simply redoes the rest.
+    """
+    config = AppConfig.from_env()
+    try:
+        windows = _dispatch_windows(args)
+        specs, feed_in = _dispatch_tariffs(args, config)
+    except (ValueError, KeyError, FileNotFoundError) as exc:
+        raise SystemExit(str(exc)) from exc
+
+    logger.info(
+        "Optimising %d window(s) %s for %d tariff(s) %s against battery %.1f kWh / %.1f kW / "
+        "%.0f%% round trip",
+        len(windows),
+        ", ".join(str(w) for w in windows),
+        len(specs),
+        ", ".join(spec.tariff_id for spec in specs),
+        config.battery.capacity_kwh,
+        config.battery.max_charge_kw,
+        config.battery.round_trip_efficiency * 100,
+    )
+
+    solved = 0
+    failures = 0
+    version = solver_version()
+
+    with psycopg.connect(config.postgres.dsn) as conn:
+        repo = DispatchRepository(
+            conn,
+            derived_schema=config.postgres.derived_schema,
+            marts_schema=config.postgres.marts_schema,
+        )
+        repo.ensure_schema()
+        if not repo.input_relation_exists():
+            raise SystemExit(
+                f"{config.postgres.marts_schema}.mart_hourly_energy does not exist; run "
+                "`just dbt-build` before `just dispatch`"
+            )
+
+        for window in windows:
+            regions = (args.site,) if args.site else repo.regions(window)
+            if not regions:
+                logger.warning(
+                    "  %s: no site has telemetry in this window, nothing to solve", window
+                )
+                continue
+            for region in regions:
+                for spec in specs:
+                    try:
+                        hours = repo.read_window(window, region)
+                        solution = runner.solve(
+                            window, region, hours, spec, feed_in, config.battery
+                        )
+                        counts = repo.replace_window(solution, config.battery, version)
+                    except (DispatchError, DispatchInputError):
+                        failures += 1
+                        logger.exception(
+                            "Failed to solve %s %s under %s", window, region, spec.tariff_id
+                        )
+                        continue
+                    solved += 1
+                    _log_solution(window, region, solution, counts.replaced > 0)
+
+    logger.info("Done. solved=%d failures=%d solver=highs/%s", solved, failures, version)
+    return 1 if failures else 0
+
+
+def _log_solution(
+    window: CoverageWindow,
+    region: str,
+    solution: runner.WindowSolution,
+    replaced: bool,
+) -> None:
+    """One line per solved (window, site, tariff): every scenario's objective, and the saving."""
+    objectives = {result.scenario.value: result.objective_eur for result in solution.results}
+    baseline = objectives["naive_continuous"]
+    logger.info(
+        "  %s %s %s: optimal %+.2f EUR vs naive %+.2f (saves %+.2f) | no-battery %+.2f | "
+        "terminal %.2f ct/kWh%s",
+        window,
+        region,
+        solution.tariff_id,
+        objectives["optimal"],
+        baseline,
+        baseline - objectives["optimal"],
+        objectives["no_battery"],
+        solution.terminal_value_eur_kwh * 100,
+        " [replaced]" if replaced else "",
+    )
+
+
+def _dispatch_windows(args: argparse.Namespace) -> tuple[CoverageWindow, ...]:
+    """The windows to solve: an explicit ad-hoc range, or every one the dbt project declares."""
+    if (args.from_date is None) != (args.to_date is None):
+        raise ValueError("--from and --to must be given together, or neither")
+    if args.from_date is not None and args.to_date is not None:
+        return (CoverageWindow(start=args.from_date, end=args.to_date),)
+    return load_coverage_windows()
+
+
+def _dispatch_tariffs(
+    args: argparse.Namespace, config: AppConfig
+) -> tuple[tuple[TariffSpec, ...], TariffSpec]:
+    """The consumption tariffs to price under, and the feed-in scheme in force.
+
+    Defaults to every consumption row in the catalogue -- the marts compare tariffs, so solving
+    only one would leave the comparison half-built. The feed-in scheme is chosen by config, mirror-
+    ing the dbt ``feed_in_tariff_id`` var; exactly one applies at a time.
+    """
+    catalog = load_catalog()
+    feed_in = resolve(config.tariffs.feed_in_tariff_id, catalog)
+    if args.tariffs:
+        ids = [token.strip() for token in args.tariffs.split(",") if token.strip()]
+        if not ids:
+            raise ValueError("--tariff was given but selected no tariffs")
+        specs = tuple(resolve(tariff_id, catalog) for tariff_id in ids)
+        for spec in specs:
+            if not spec.is_consumption:
+                raise ValueError(
+                    f"tariff {spec.tariff_id!r} is a {spec.kind.value} row and prices exports, "
+                    "not consumption"
+                )
+        return specs, feed_in
+    return tuple(spec for spec in catalog.values() if spec.is_consumption), feed_in
 
 
 def _parse_datasets(raw: str) -> list[Dataset]:

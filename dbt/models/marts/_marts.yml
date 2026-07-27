@@ -153,6 +153,113 @@ models:
       - name: is_partial_month
         tests: [not_null]
 
+  - name: mart_dispatch_comparison
+    description: >
+      What a perfectly-dispatched battery would have cost, per coverage window and consumption
+      tariff, against three baselines: no battery at all, the naive self-consumption the M3
+      generator actually emitted, and the same naive policy with state of charge carried across the
+      window. Money in EUR, energy in kWh, energy cost only -- the standing charge is identical in
+      every scenario and cancels out of every saving.
+
+      RANK SCENARIOS BY adjusted_net_cost_eur, never by net_cost_eur. It is the quantity the
+      optimiser minimises: net cost less the value of the energy still stored at the window's end.
+      Without that term a hindsight optimum simply empties the battery on the last evening and
+      books the proceeds as savings. The adjustment is fully exposed so it can be undone.
+
+      COMPARE AGAINST naive_continuous. The generator restarts each Berlin day from a fixed state of
+      charge -- the price of its per-partition purity -- so naive_telemetered carries the cost of
+      energy it bought and discarded at midnight, visible in battery_unreturned_kwh. It is reported
+      because it is what the warehouse holds, not because it is a fair baseline.
+
+      Values are stable; schedules are not. An optimal dispatch is non-unique, so this mart and its
+      tests assert on cost and on invariants and never on a specific hour -- see the `derived`
+      source for why the raw zone's content-hash contract deliberately stops here.
+      Grain: (window_start, window_end, region, tariff_id, scenario).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [window_start, window_end, region, tariff_id, scenario]
+    columns:
+      - name: window_start
+        description: First Europe/Berlin day of the declared coverage window, inclusive.
+        tests: [not_null]
+      - name: window_end
+        description: Last Europe/Berlin day of the window, inclusive.
+        tests: [not_null]
+      - name: region
+        tests: [not_null]
+      - name: tariff_id
+        tests: [not_null]
+      - name: scenario
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["no_battery", "naive_telemetered", "naive_continuous", "optimal"]
+      - name: net_cost_eur
+        description: energy_cost_eur - feed_in_revenue_eur. Negative means the window earned money.
+      - name: terminal_soc_delta_kwh
+        description: >
+          Stored energy at the end of the window less what it started with. Zero for no_battery,
+          which has no store whose level could change.
+      - name: terminal_value_ct_kwh
+        description: >
+          What a stored kWh was credited at: the cheapest non-negative import price the window
+          offered, a deliberate lower bound. Crediting at the mean instead would make ending the
+          window full profitable in itself and the optimiser would hoard.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0}
+      - name: adjusted_net_cost_eur
+        description: >
+          net_cost_eur - terminal_value_eur. The optimiser's objective, and the only column the four
+          scenarios may be ranked by.
+        tests: [not_null]
+      - name: battery_unreturned_kwh
+        description: >
+          Charged but not discharged within the window. A few percent of charge is honest
+          round-trip loss; a large value is the generator's midnight reset, which is why
+          naive_telemetered is not the baseline. Zero for no_battery.
+      - name: savings_vs_naive_continuous_eur
+        description: >
+          The headline figure, on the `optimal` row: how much cheaper hindsight-optimal dispatch was
+          than the same naive policy run with continuous state of charge. Never negative on that
+          row -- naive_continuous is a feasible point of the optimiser's own problem.
+      - name: savings_vs_no_battery_eur
+        description: What the battery was worth at all, against a PV-only household.
+      - name: savings_vs_naive_continuous_pct
+        description: >
+          NULL where the baseline cost nothing or earned money -- a percentage saving off a negative
+          bill is arithmetic dressed up as a result.
+        tests:
+          - dbt_utils.accepted_range:
+              max_value: 1
+              config: {where: "savings_vs_naive_continuous_pct is not null"}
+      - name: solver
+        description: "'highs' for the optimum; 'simulated' or 'telemetered' for the baselines."
+        tests: [not_null]
+      - name: solver_status
+        description: The solver's own verdict. Anything but 'Optimal' means the row is not a minimum.
+        tests:
+          - not_null
+          - accepted_values: {values: ["Optimal", "Simulated"]}
+      - name: expected_hours
+        description: >
+          Hours the window claims, from the Berlin calendar -- 167 across the spring-forward week,
+          169 across fall-back. Never counted from these rows.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 1, max_value: 8784}
+      - name: priced_hours
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0}
+      - name: completeness_ratio
+        description: priced_hours / expected_hours. Below 1 means the window is partly unpriced.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 1}
+      - name: is_partial_window
+        tests: [not_null]
+
   - name: mart_data_quality
     description: >
       Per-source coverage gaps, nulls, and freshness. One row per (source, dataset, region,

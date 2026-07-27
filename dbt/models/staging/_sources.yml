@@ -27,3 +27,30 @@ sources:
           this (enforced by tests/dbt/test_no_lookahead.py).
       - name: forecast_ingestion
         description: One row per forecast vintage; carries issue_date, issue_time, fetched_at.
+
+  - name: derived
+    description: >
+      Results computed by the Python package and read back here -- currently the M6 battery
+      dispatch optimiser (`energy-platform dispatch`). Read-only, like `raw`.
+
+      A DIFFERENT CONTRACT FROM THE RAW ZONE, deliberately. Ingestion is content-hashed and
+      bit-reproducible, so re-running it is a verifiable no-op. An optimal dispatch is not:
+      the optimal *value* is unique, but the optimal *schedule* generally is not (equally-priced
+      hours are interchangeable), so a re-solve may legitimately return a different schedule with
+      an identical cost. These tables are therefore replace-on-rerun rather than
+      append-with-hash, and downstream models assert on cost and on invariants -- never on a
+      specific hour's charge value. See src/energy_platform/dispatch/store.py.
+
+      Because the optimiser reads mart_hourly_energy and writes these tables, it runs BETWEEN two
+      dbt invocations; `just warehouse` is the sequence that works on an empty database.
+    schema: "{{ env_var('ENERGY_DERIVED_SCHEMA', 'derived') }}"
+    tables:
+      - name: dispatch_runs
+        description: >
+          One row per (region, window, tariff, scenario): the settled totals, the terminal-SoC
+          adjustment, and the solver and input digest that produced them.
+      - name: dispatch_schedule
+        description: >
+          The hourly schedule behind each run -- flows, state of charge, and per-hour money.
+          `is_priced` marks the hours every term was present for, exactly as
+          int_hourly_tariff_cost does, so the two layers aggregate on the same flag.

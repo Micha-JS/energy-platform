@@ -17,6 +17,15 @@ from urllib.parse import quote
 DEFAULT_SMARD_BASE_URL = "https://www.smard.de/app/chart_data"
 DEFAULT_RAW_SCHEMA = "raw"
 
+# The three schemas of the warehouse, and the contract each one holds:
+#   raw       -- append-only, content-hashed; re-ingestion is a verifiable no-op (M1)
+#   analytics -- dbt's output; `analytics_marts` is the target schema plus the marts layer suffix
+#   derived   -- Python-computed results dbt reads back as a source (M6's dispatch optimiser).
+#                Replace-on-rerun, NOT append-with-hash: an optimal schedule is not unique, so a
+#                re-solve returning a different one is correct rather than a revision to preserve.
+DEFAULT_MARTS_SCHEMA = "analytics_marts"
+DEFAULT_DERIVED_SCHEMA = "derived"
+
 # Public Open-Meteo API base URLs (no API key required, CC BY 4.0).
 DEFAULT_OPEN_METEO_ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 DEFAULT_OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
@@ -112,11 +121,17 @@ def _parse_entity_map(raw: str) -> tuple[tuple[str, str], ...]:
 
 @dataclass(frozen=True, slots=True)
 class PostgresConfig:
-    """Connection settings for the raw-zone Postgres database.
+    """Connection settings for the Postgres database, and the schemas the platform uses in it.
 
     Defaults mirror the compose stack (``dagster`` / ``dagster`` on ``localhost:5432``),
     so a freshly cloned repo needs no configuration. ``ENERGY_PG_*`` overrides win over
     the shared ``DAGSTER_POSTGRES_*`` variables, which win over the defaults.
+
+    ``schema`` is the append-only raw zone the connectors write. ``marts_schema`` is where dbt
+    materialises its marts -- the dispatch optimiser *reads* it and never writes there.
+    ``derived_schema`` is where the optimiser's own results land for dbt to read back as a source;
+    it must match the ``derived`` source's schema in ``dbt/models/staging/_sources.yml``, which
+    resolves the same ``ENERGY_DERIVED_SCHEMA`` variable.
     """
 
     host: str = "localhost"
@@ -125,6 +140,8 @@ class PostgresConfig:
     password: str = "dagster"
     database: str = "dagster"
     schema: str = DEFAULT_RAW_SCHEMA
+    marts_schema: str = DEFAULT_MARTS_SCHEMA
+    derived_schema: str = DEFAULT_DERIVED_SCHEMA
 
     @classmethod
     def from_env(cls) -> PostgresConfig:
@@ -135,6 +152,8 @@ class PostgresConfig:
             password=_env("ENERGY_PG_PASSWORD", "DAGSTER_POSTGRES_PASSWORD", default="dagster"),
             database=_env("ENERGY_PG_DB", "DAGSTER_POSTGRES_DB", default="dagster"),
             schema=_env("ENERGY_RAW_SCHEMA", default=DEFAULT_RAW_SCHEMA),
+            marts_schema=_env("ENERGY_MARTS_SCHEMA", default=DEFAULT_MARTS_SCHEMA),
+            derived_schema=_env("ENERGY_DERIVED_SCHEMA", default=DEFAULT_DERIVED_SCHEMA),
         )
 
     @property

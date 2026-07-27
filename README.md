@@ -6,15 +6,18 @@
 German day-ahead market data + real PV/battery telemetry (Fenecon Home 10, 8.8 kWp /
 14 kWh) → warehouse → dbt marts → battery dispatch optimizer → ML forecasts → dashboard.
 
-> **Status: M5 — economics.** A typed tariff engine (static, dynamic day-ahead, feed-in) prices the
-> warehouse: `mart_tariff_counterfactuals` answers *"what would this household have paid under
-> tariff X, with and without the battery"*, and `mart_solar_economics` reports self-consumption,
-> autarky, and avoided grid cost against feed-in revenue. Tariff parameters live in **one committed
-> CSV** that dbt seeds and the Python engine reads, and a reconciliation test recomputes every
-> priced hour in Python to prove the SQL and the package agree. CI rebuilds the whole warehouse
-> from the real CLI on offline-seeded data — including both DST transitions — and publishes the
-> [dbt docs site](https://micha-js.github.io/energy-platform/). The optimizer, forecasting, and the
-> dashboard land in later milestones.
+> **Status: M6 — the dispatch optimizer.** A MILP (HiGHS via PuLP) computes the
+> *hindsight-optimal* battery schedule for every covered week under each tariff, using the same
+> `BatteryConfig` the synthetic generator simulates and the same tariff engine the economics marts
+> price with — so `mart_dispatch_comparison` compares four dispatches on identical physics and
+> identical money. Over the two covered weeks the battery is worth **€20–22**, and optimal dispatch
+> adds **€0.36** on top of naive self-consumption. That second number being small is the finding,
+> not a disappointment: see [the headline, honestly](#the-headline-honestly). Property tests assert
+> energy conservation, SoC bounds, and both exclusivities on every solution, and prove the optimum
+> never costs more than a baseline that is feasible for its own problem. CI rebuilds the warehouse,
+> solves, and rebuilds on offline-seeded data, and publishes the
+> [dbt docs site](https://micha-js.github.io/energy-platform/). Forecasting and the dashboard land
+> in later milestones.
 
 ## Architecture
 
@@ -30,9 +33,10 @@ German day-ahead market data + real PV/battery telemetry (Fenecon Home 10, 8.8 k
                                         (energy_platform pkg) ▼    dashboard
 ```
 
-- **`src/energy_platform/`** — typed Python package: `tariffs/`, `dispatch/` (LP battery
-  optimizer), `forecasting/` (PV + load models), `connectors/` (market/weather/telemetry
-  clients). The Dagster code location lives at `energy_platform.definitions:defs`.
+- **`src/energy_platform/`** — typed Python package: `tariffs/`, `dispatch/` (MILP battery
+  optimizer, HiGHS via PuLP), `forecasting/` (PV + load models), `connectors/`
+  (market/weather/telemetry clients). The Dagster code location lives at
+  `energy_platform.definitions:defs`.
 - **Orchestration** — Dagster assets, partitions, and schedules in
   `energy_platform.orchestration`, backed by Postgres for run and event storage.
 - **Warehouse & transforms** — append-only raw zone; dbt staging → intermediate → marts.
@@ -257,6 +261,111 @@ Design decisions worth calling out:
   misleading comparison, both marts expose `battery_unreturned_kwh`. Carrying SoC across partitions
   is an M3 change (it rewrites every content hash) and is tracked separately.
 
+## Battery dispatch optimizer (M6)
+
+The headline. A mixed-integer linear program in
+[`src/energy_platform/dispatch/`](src/energy_platform/dispatch/) computes the **hindsight-optimal**
+battery schedule for each declared coverage window under each tariff — minimise cost subject to
+capacity, separate charge/discharge power limits, round-trip efficiency, SoC continuity and SoC
+bounds, in hourly steps — and `mart_dispatch_comparison` sets it against three baselines.
+
+The comparison is like-for-like **by construction, not by assertion**: the physics is the same
+`BatteryConfig` the M3 generator simulates under, the money is the same `energy_platform.tariffs`
+engine the M5 marts price with, and all four scenarios are settled by one function from one set of
+hourly inputs.
+
+| Scenario | What it is |
+| --- | --- |
+| `no_battery` | PV only — M5's counterfactual |
+| `naive_telemetered` | exactly what the M3 generator emitted |
+| `naive_continuous` | the same naive policy, SoC carried across the window |
+| `optimal` | the MILP |
+
+```bash
+just warehouse    # dbt build -> energy-platform dispatch -> dbt build (the only order that works)
+just dispatch     # re-solve on an already-built warehouse
+```
+
+### The headline, honestly
+
+Over the two seeded weeks (167 + 169 hours — the DST weeks, so not 336):
+
+| | over the covered weeks | very rough annualisation |
+| --- | --- | --- |
+| Battery vs no battery, naive dispatch | **€20.24** (dynamic) / **€21.80** (static) | ~€530 / ~€570 |
+| Optimal dispatch on top of naive | **€0.36** (dynamic) / **€0.00** (static) | ~€9 / ~€0 |
+
+**The annualisation is an extrapolation, not a measurement, and a bad one.** Two weeks is 4% of a
+year, both windows are shoulder-season, and the March week is unusually sunny while the October week
+is dark — the same arithmetic applied to the absolute costs produces a household that *earns* money
+every year, which is obviously false. The per-window figures are what the data supports. Once real
+Fenecon telemetry has accumulated a few months, this table gets replaced with a measured number.
+
+Design decisions worth calling out:
+
+- **The optimizer is worth much less than the battery, and that is the interesting result.** Naive
+  self-consumption already captures nearly all of the value: this battery is sized for
+  self-consumption, so in a sunny week it is saturated by PV with no headroom left to arbitrage, and
+  optimal dispatch is *identical* to naive. The €0.36 comes almost entirely from the darker October
+  week, where there is spare capacity and a dynamic price to exploit. Reporting the small number
+  next to the large one is the whole point — a "€500/year optimizer" claim would be attributing the
+  battery's value to the optimizer.
+- **Which baseline you pick changes the answer by 50×.** Measured against `naive_telemetered`, the
+  optimizer "saves" €16.92 over the two weeks — about €440/year. Almost all of that is M3's midnight
+  SoC reset: the generator discards stored energy at every day boundary, so that baseline pays for
+  energy it never uses (69.6 kWh unreturned in the March window against 14.8 for continuous SoC).
+  `naive_continuous` runs the *identical* `dispatch_hour` function through the *identical* config and
+  differs only in carrying SoC through midnight, which is why it is the baseline and why
+  `naive_telemetered` is reported beside it rather than quietly dropped.
+- **Negative prices break a pure LP, and the meter is the live trap — not the battery.** The
+  briefing for this milestone expected simultaneous charge/discharge to be the problem: an LP paid
+  to consume will burn energy through the round-trip losses. Working it through, that turns out to
+  be *weakly dominated* once the meter is exclusive — raising both legs together moves the metered
+  flow not at all and strictly costs SoC — so no price makes it strictly profitable. The real
+  failure is one step earlier. Feed-in is a **flat** statutory rate, so as soon as the retail import
+  price drops below it, importing and exporting the same kWh is paid at both ends and the LP is
+  **unbounded**. With this catalogue that crossover is **−123.75 €/MWh**, not the deep tail; no
+  battery is involved, so no battery-side post-check would ever have caught it, and there is no
+  optimum to repair towards. `tests/dispatch/test_negative_prices.py` derives the threshold from the
+  seed and shows the naive LP bounded five euros above it and unbounded five below.
+- **So: MILP, and the two binaries are justified differently.** Meter exclusivity is load-bearing.
+  Battery exclusivity is a *guarantee against degeneracy* — the test asserts that dropping it alone
+  leaves the optimal value unchanged, which is the honest claim. Optimal solutions are non-unique,
+  and which vertex a simplex returns is not something a model gets to promise; the binary turns "the
+  solver happens not to" into "the formulation does not permit it", for ~336 binaries HiGHS closes
+  in milliseconds. Big-Ms come from each hour's own PV and load, and are attached to the exclusivity
+  constraints only — putting them on the variable bounds as well would have kept the relaxation
+  finite and hidden the pathology.
+- **`SoC_end ≥ SoC_start` is a trap: it is vacuous.** Without any boundary condition, hindsight
+  optimization drains the battery on the last evening and books the proceeds as savings. The obvious
+  fix does nothing, because the window starts at `soc_min` and the SoC lower bound already forces
+  it. Terminal energy is **valued in the objective** instead, at the cheapest non-negative import
+  price the window offered. The mean is the tempting choice and is wrong: charging at `p` and being
+  credited `λ·√rte` pays whenever `p < λ·rte`, which for a mean is most hours — on a test day the
+  optimizer hoarded 14.5 kWh in and 2.0 out, finishing 88% full. The minimum makes hoarding provably
+  unprofitable while still stopping the drain. Every row carries its terminal SoC delta and credit,
+  so the adjustment can be recomputed at any other valuation; sweeping it from 0 to 40 ct/kWh moves
+  the optimizer's saving only between €0.00 and €0.89.
+- **Valuing it that way is what makes "optimal ≤ naive" a theorem.** `naive_continuous` and
+  `no_battery` satisfy every constraint the optimizer solves under and start from the same SoC, so
+  both are *feasible points of its own problem* and a minimum cannot exceed them. A cyclic
+  `SoC_end = SoC_start` constraint would have pushed both out of the feasible set and left the
+  property test asserting something that could legitimately fail. `naive_telemetered` is not
+  feasible — its SoC jumps at midnight — and is deliberately excluded from that assertion.
+- **Ingestion is bit-reproducible; optimization results are not, and the repo says so.** This is the
+  first component the raw zone's content-hash contract deliberately does not cover. The optimal
+  *value* is unique; the optimal *schedule* generally is not, so a re-solve may legitimately return a
+  different schedule at an identical cost. The derived zone is therefore **replace-on-rerun** rather
+  than append-with-hash, the claim is **value-stable, not hash-guaranteed**, and every test and mart
+  asserts on cost and on invariants — never on a specific hour's charge. `solver`, `solver_version`
+  and an `input_digest` (of the *inputs*, not the results) are recorded so a divergence can be
+  attributed rather than argued about. One invariant does not cover a whole platform.
+- **Coverage windows are read from `dbt_project.yml`, not copied.** The optimizer parses the same
+  `coverage_windows` var the hourly spine is generated from — the same "one file, two readers"
+  pattern the tariff catalogue uses — so the two cannot drift. It also means the windows are
+  DST-correct on both sides: 167 hours and 169, never 7 × 24, and a mart short of that count fails
+  rather than being optimized as if it were whole.
+
 ## Engineering invariants
 
 - **Idempotent, re-runnable ingestion** — content-hash verification, safe backfills.
@@ -265,6 +374,9 @@ Design decisions worth calling out:
   prediction time.
 - **NaN over fabrication** — missing intervals stay missing and are surfaced by dbt tests.
 - **Reproducible builds** — `uv.lock` committed; CI and the Docker image install `--frozen`.
+- **Claims are scoped to what holds** — ingestion is bit-reproducible and content-hashed;
+  optimization results are value-stable but explicitly *not* hash-guaranteed, because an optimal
+  schedule is not unique. Stretching one invariant to cover both would make it false.
 
 ## Privacy
 
@@ -303,8 +415,9 @@ seed the stack.
 
 CI runs the full quality gate (against a Postgres service container, so the raw-zone
 idempotency tests execute), a `dbt` job that rebuilds and tests the warehouse on offline-seeded
-data and then runs the warehouse guards — the no-lookahead manifest check and the Python↔SQL tariff
-reconciliation, both of which hard-fail rather than skip there — and `docker compose config`
+data, solves the dispatch optimizer, builds the dispatch mart, and then runs the warehouse guards —
+the no-lookahead manifest check and the Python↔SQL tariff and dispatch reconciliations, all of which
+hard-fail rather than skip there — and `docker compose config`
 validation on every push and PR; the dbt docs site publishes to GitHub Pages on merge to main.
 
 ## License
