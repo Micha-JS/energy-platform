@@ -11,6 +11,8 @@ from dagster import ConfigurableResource, InitResourceContext
 
 from energy_platform.config import (
     DEFAULT_BATTERY_CAPACITY_KWH,
+    DEFAULT_DERIVED_SCHEMA,
+    DEFAULT_MARTS_SCHEMA,
     DEFAULT_OPEN_METEO_ARCHIVE_URL,
     DEFAULT_OPEN_METEO_FORECAST_URL,
     DEFAULT_PV_AC_CAP_KW,
@@ -20,6 +22,7 @@ from energy_platform.config import (
     DEFAULT_RAW_SCHEMA,
     DEFAULT_SITE_ID,
     DEFAULT_SMARD_BASE_URL,
+    DEFAULT_STAGING_SCHEMA,
     BatteryConfig,
     PvSystemConfig,
     SyntheticConfig,
@@ -226,4 +229,33 @@ class HomeAssistantResource(ConfigurableResource[HomeAssistantClient]):
                 self.base_url,
                 entities,
                 max_retries=self.max_retries,
+            )
+
+
+class ForecastPostgresResource(ConfigurableResource["object"]):
+    """Opens a connection for the M7 backtester.
+
+    Unlike the raw-zone resource this does NOT create its schema in ``setup_for_execution``: the
+    backtester reads two dbt relations that only exist after a ``dbt build``, so a resource that
+    eagerly touched the database would fail at definition-load time on a fresh clone. The asset
+    creates what it writes, when it runs.
+    """
+
+    dsn: str
+    derived_schema: str = DEFAULT_DERIVED_SCHEMA
+    marts_schema: str = DEFAULT_MARTS_SCHEMA
+    staging_schema: str = DEFAULT_STAGING_SCHEMA
+
+    @contextmanager
+    def get_repository(self) -> Iterator[object]:
+        # Imported here, not at module scope: the forecasting package pulls numpy, pandas, scipy,
+        # pvlib and scikit-learn, and the Dagster code location should not pay that on every load.
+        from energy_platform.forecasting.store import ForecastRepository
+
+        with psycopg.connect(self.dsn) as conn:
+            yield ForecastRepository(
+                conn,
+                derived_schema=self.derived_schema,
+                marts_schema=self.marts_schema,
+                staging_schema=self.staging_schema,
             )

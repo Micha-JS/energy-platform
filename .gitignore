@@ -25,6 +25,11 @@ dbt/dbt_packages/
 dbt/logs/
 dbt/.user.yml
 
+# Trained forecasting models (M7). Deliberately NOT committed: CI retrains from scratch each run
+# -- seconds at this data size -- so no binary enters the repo and no pickle can go stale against a
+# scikit-learn upgrade. Provenance lives in the derived zone, which is where it is queryable.
+artifacts/
+
 # Env / secrets
 .env
 *.local

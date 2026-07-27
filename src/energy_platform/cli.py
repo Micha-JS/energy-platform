@@ -7,8 +7,13 @@ idempotent (re-running is a content-hash no-op) and resumable (each partition co
 independently, so an interrupted run simply continues on retry).
 
 ``energy-platform forecast-snapshot`` captures *today's* Open-Meteo forecast as one immutable
-vintage. Forecasts are never backfillable -- the API only serves the current issue -- so this
+vintage. Real forecasts are never backfillable -- the API only serves the current issue -- so this
 command has no date range; the daily Dagster schedule is the primary accrual path.
+
+``energy-platform forecast-backfill`` is its mirror image: it *reconstructs* synthetic vintages
+over a range of past issue days by degrading the archive weather that actually happened, which is
+the only way the public demo has both a forecast and its own outcome in one window. It takes a
+range precisely because it can only ever run retrospectively, and it is never scheduled.
 
 ``energy-platform dispatch`` solves the M6 battery optimiser over each declared coverage window and
 writes the four scenarios to the derived zone. Unlike the two above it reads a *mart* rather than
@@ -50,6 +55,11 @@ from energy_platform.connectors.smard import USER_AGENT, SmardClient
 from energy_platform.connectors.synthetic import (
     TELEMETRY_DATASETS,
     SyntheticTelemetryClient,
+)
+from energy_platform.connectors.synthetic_forecast import (
+    GENERATOR_VERSION,
+    SyntheticForecastClient,
+    issue_time_for,
 )
 from energy_platform.connectors.types import Dataset, Resolution
 from energy_platform.dispatch import runner
@@ -138,6 +148,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_backfill(args)
     if args.command == "forecast-snapshot":
         return _run_forecast_snapshot(args)
+    if args.command == "forecast-backfill":
+        return _run_forecast_backfill(args)
+    if args.command == "forecast":
+        return _run_forecast(args)
     if args.command == "dispatch":
         return _run_dispatch(args)
     parser.print_help()
@@ -214,6 +228,72 @@ def _build_parser() -> argparse.ArgumentParser:
         "--offline, the issue date the recorded fixture actually represents.",
     )
     _add_offline_args(snapshot)
+
+    forecast_backfill = sub.add_parser(
+        "forecast-backfill",
+        help="Generate synthetic forecast vintages from ingested archive actuals (retrospective).",
+        description=(
+            "Reconstructs one immutable vintage per issue day by degrading the archive weather "
+            "that actually happened. This is the only way the public demo has a forecast and its "
+            "own outcome in the same window: real Open-Meteo vintages accrue forward and cannot be "
+            "backfilled. Deliberately retrospective and never scheduled -- it reads weather that "
+            "settles days after the instant each vintage claims to have been issued at."
+        ),
+    )
+    forecast_backfill.add_argument(
+        "--issue-from",
+        dest="issue_from",
+        required=True,
+        type=date.fromisoformat,
+        metavar="YYYY-MM-DD",
+        help="First issue day (inclusive), Europe/Berlin calendar.",
+    )
+    forecast_backfill.add_argument(
+        "--issue-to",
+        dest="issue_to",
+        required=True,
+        type=date.fromisoformat,
+        metavar="YYYY-MM-DD",
+        help="Last issue day (inclusive).",
+    )
+    forecast_backfill.add_argument(
+        "--site",
+        default=None,
+        help="Site id to generate for (default: the configured default site).",
+    )
+
+    forecast = sub.add_parser(
+        "forecast",
+        help="Backtest the PV and load forecast models over the declared coverage windows.",
+        description=(
+            "Expanding-window time-series CV. Writes derived.forecast_runs and "
+            "derived.forecast_predictions, which mart_forecast_eval reads back -- so this runs "
+            "between two dbt invocations, exactly as `dispatch` does. Baselines are always "
+            "evaluated alongside the models; on synthetic data the flat-plate PV model is the "
+            "data-generating process rather than a competitor and is labelled role='oracle'."
+        ),
+    )
+    forecast.add_argument(
+        "--site", default=None, help="Site id (default: the configured default site)."
+    )
+    forecast.add_argument(
+        "--target",
+        dest="targets",
+        default=None,
+        help="Comma-separated subset of: pv_production_kwh, household_load_kwh (default: both).",
+    )
+    forecast.add_argument(
+        "--from",
+        dest="from_date",
+        default=None,
+        type=date.fromisoformat,
+        metavar="YYYY-MM-DD",
+        help="Backtest this ad-hoc window instead of the declared ones (requires --to). Reported "
+        "but NOT written -- the derived tables hold the declared windows and nothing else.",
+    )
+    forecast.add_argument(
+        "--to", dest="to_date", default=None, type=date.fromisoformat, metavar="YYYY-MM-DD"
+    )
 
     dispatch = sub.add_parser(
         "dispatch",
@@ -491,6 +571,205 @@ def _run_forecast_snapshot(args: argparse.Namespace) -> int:
         result.horizon_days,
     )
     return 0
+
+
+def _run_forecast_backfill(args: argparse.Namespace) -> int:
+    """Generate one synthetic vintage per issue day, from already-ingested archive actuals.
+
+    Weather is required for a *wider* span than the issue days themselves: a vintage issued on D at
+    18:00 local reaches 48 hours forward, so it describes hours on D, D+1 and D+2. Checking only the
+    issue days would let the last two vintages of any range come out truncated or all-null, and
+    nothing downstream could distinguish that from a genuinely uncertain forecast.
+    """
+    config = AppConfig.from_env()
+    site_id = args.site or config.site.default_id
+    if args.issue_to < args.issue_from:
+        raise SystemExit("--issue-to is before --issue-from")
+
+    issue_days = list(_date_range(args.issue_from, args.issue_to))
+    horizon_days = sorted(
+        {day + timedelta(days=offset) for day in issue_days for offset in (0, 1, 2)}
+    )
+    logger.info(
+        "Generating %d synthetic vintage(s) for site %s, issue %s..%s (needs archive weather "
+        "through %s)",
+        len(issue_days),
+        site_id,
+        args.issue_from,
+        args.issue_to,
+        horizon_days[-1],
+    )
+
+    loaded = noop = revision = failures = 0
+    with psycopg.connect(config.postgres.dsn) as conn:
+        repo = RawZoneRepository(conn, schema=config.postgres.schema)
+        repo.ensure_schema()
+        try:
+            require_weather_ingested(
+                repo,
+                site_id,
+                horizon_days,
+                consumer="synthetic forecast vintages",
+                hint="Each vintage degrades the archive weather for its own 48-hour horizon, so "
+                "the two days after the last issue day are needed too. Backfill weather for the "
+                "full span first: `just backfill --datasets weather --from ... --to ...`.",
+            )
+        except WeatherDependencyError as exc:
+            raise SystemExit(str(exc)) from exc
+
+        for issue_day in issue_days:
+            client = SyntheticForecastClient(repo, issue_day=issue_day, synthetic=config.synthetic)
+            try:
+                result = ingest_forecast_vintage(
+                    client,
+                    repo,
+                    site_id,
+                    Resolution.HOUR,
+                    issue_day,
+                    issue_time_for(issue_day),
+                )
+            except Exception:
+                failures += 1
+                logger.exception("Failed to generate vintage for issue day %s", issue_day)
+                continue
+            if result.outcome is WriteOutcome.LOADED:
+                loaded += 1
+            elif result.outcome is WriteOutcome.NOOP:
+                noop += 1
+            else:
+                revision += 1
+
+    logger.info(
+        "Done. loaded=%d noop=%d revision=%d failures=%d generator=%s",
+        loaded,
+        noop,
+        revision,
+        failures,
+        GENERATOR_VERSION,
+    )
+    return 1 if failures else 0
+
+
+def _run_forecast(args: argparse.Namespace) -> int:
+    """Backtest every model over each declared window and replace its rows in the derived zone.
+
+    The forecasting package is imported *here* rather than at module level: it pulls numpy, pandas,
+    scipy, pvlib and scikit-learn, and `energy-platform backfill` has no business paying that import
+    cost. tests/test_import_containment.py asserts the CLI stays clean.
+    """
+    from energy_platform.forecasting import runner
+    from energy_platform.forecasting.store import ForecastRepository, run_payload
+    from energy_platform.forecasting.vintage import PERSISTENCE_RULE_ID, SELECTION_RULE_ID
+
+    config = AppConfig.from_env()
+    site_id = args.site or config.site.default_id
+    site = config.site.resolve(site_id)
+    targets = _forecast_targets(args)
+
+    if (args.from_date is None) != (args.to_date is None):
+        raise SystemExit("--from and --to must be given together, or neither")
+    ad_hoc = args.from_date is not None
+    windows = (
+        (CoverageWindow(start=args.from_date, end=args.to_date),)
+        if ad_hoc
+        else load_coverage_windows()
+    )
+    if ad_hoc:
+        logger.info("AD-HOC WINDOW -- backtested and reported, NOT persisted.")
+
+    logger.info(
+        "Backtesting %d window(s) for site %s, targets %s | vintages=%s lag=%dh folds=every %dd",
+        len(windows),
+        site_id,
+        ", ".join(targets),
+        config.forecast.forecast_source,
+        config.forecast.telemetry_lag_hours,
+        config.forecast.fold_stride_days,
+    )
+
+    written = runs_seen = skipped = 0
+    with psycopg.connect(config.postgres.dsn) as conn:
+        repo = ForecastRepository(
+            conn,
+            derived_schema=config.postgres.derived_schema,
+            marts_schema=config.postgres.marts_schema,
+            staging_schema=config.postgres.staging_schema,
+        )
+        if not ad_hoc:
+            repo.ensure_schema()
+        has_observations, has_vintages = repo.input_relations_exist()
+        if not has_observations:
+            raise SystemExit(
+                f"{config.postgres.marts_schema}.mart_hourly_energy does not exist; "
+                "run `just dbt-build` before `just forecast`"
+            )
+        if not has_vintages:
+            raise SystemExit(
+                f"{config.postgres.staging_schema}.stg_weather_forecast does not exist; "
+                "run `just dbt-build` before `just forecast`"
+            )
+
+        for window in windows:
+            observations = repo.read_observations(window.start, window.end, site_id)
+            vintages = repo.read_vintages(
+                site_id, config.forecast.forecast_source, window.start, window.end
+            )
+            if not observations:
+                logger.warning("  %s %s: no observations, skipped", window, site_id)
+                continue
+            for target in targets:
+                result = runner.backtest(
+                    site,
+                    target,
+                    window.start,
+                    window.end,
+                    observations,
+                    vintages,
+                    config=config.forecast,
+                    pv=config.pv,
+                )
+                skipped += len(result.skipped_days)
+                runs_seen += len(result.runs)
+                for run in result.runs:
+                    logger.info(
+                        "  %s %s %s (%s): %d predicted hours from %d training rows",
+                        window,
+                        target,
+                        run.model_key,
+                        run.role,
+                        len(run.predictions),
+                        run.n_train_rows,
+                    )
+                if not ad_hoc and result.runs:
+                    counts = repo.replace_window(
+                        [
+                            run_payload(
+                                run, config.forecast, SELECTION_RULE_ID, PERSISTENCE_RULE_ID
+                            )
+                            for run in result.runs
+                        ]
+                    )
+                    written += counts.predictions
+
+    logger.info(
+        "Done. runs=%d predictions_written=%d days_without_a_vintage=%d",
+        runs_seen,
+        written,
+        skipped,
+    )
+    return 0
+
+
+def _forecast_targets(args: argparse.Namespace) -> tuple[str, ...]:
+    from energy_platform.forecasting.runner import TARGETS
+
+    if not args.targets:
+        return TARGETS
+    chosen = tuple(token.strip() for token in args.targets.split(",") if token.strip())
+    unknown = [token for token in chosen if token not in TARGETS]
+    if unknown:
+        raise SystemExit(f"unknown target(s) {unknown}; choose from {list(TARGETS)}")
+    return chosen
 
 
 def _run_dispatch(args: argparse.Namespace) -> int:

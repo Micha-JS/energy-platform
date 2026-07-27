@@ -327,3 +327,82 @@ models:
       - name: expected_hours
         tests:
           - dbt_utils.accepted_range: {min_value: 0}
+
+  - name: mart_forecast_eval
+    description: >
+      Day-ahead forecast accuracy per model per horizon hour, with the naive baselines beside every
+      model. Reads the Python-written derived.forecast_* tables, so it builds AFTER
+      `energy-platform forecast` -- see `just warehouse`.
+
+      READ `role` BEFORE RANKING ANYTHING. On synthetic windows `toy_physical` is the flat-plate
+      model M3 GENERATED THE LABELS WITH, so it carries role='oracle' and beating the field is a
+      tautology, not a result. `baseline` marks persistence and seasonal_naive. Ordering by mae_kwh
+      across all roles produces a leaderboard whose winner means nothing.
+
+      The pvlib model losing to the toy on seeded data is expected and is the honest finding: the
+      synthetic truth has no panel tilt, so plane-of-array transposition is biased against it by
+      construction. The prediction M7 ships is that this ranking INVERTS on real Fenecon telemetry,
+      because a real array is tilted. Until that data exists the seeded comparison cannot settle it.
+
+      Every model resolves against the same issue instant, the same selected vintage
+      (`selection_rule_id`) and the same observation lag (`telemetry_lag_hours`), which is what
+      makes the comparison like-for-like. Quantile columns are null for point-forecast models --
+      null rather than zero, because a model that made no interval claim has not earned a perfect
+      interval score. `interval_coverage_p10_p90` is reported against a target of 0.80, never
+      claimed as calibrated.
+
+      Grain: (site, target, model_key, window_start, window_end, horizon_hour).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [site, target, model_key, window_start, window_end, horizon_hour]
+    columns:
+      - name: site
+        tests: [not_null]
+      - name: target
+        tests:
+          - not_null
+          - accepted_values: {values: ["pv_production_kwh", "household_load_kwh"]}
+      - name: model_key
+        tests: [not_null]
+      - name: role
+        description: >
+          'oracle' = the data-generating process (never a competitor), 'baseline' = a naive model
+          every model row is read against, 'model' = an actual forecast.
+        tests:
+          - not_null
+          - accepted_values: {values: ["oracle", "baseline", "model"]}
+      - name: horizon_hour
+        tests: [not_null]
+      - name: scored_hours
+        description: Hours with both a prediction and an actual. A gap is never scored as a zero.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 1}
+      - name: mae_kwh
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "mae_kwh is not null"}}
+      - name: rmse_kwh
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "rmse_kwh is not null"}}
+      - name: pinball_p50_kwh
+        description: Half the MAE by construction -- the identity the reconciliation test pins.
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "pinball_p50_kwh is not null"}}
+      - name: interval_coverage_p10_p90
+        description: Empirical fraction inside [p10, p90]. Target 0.80; reported, not claimed.
+        tests:
+          - dbt_utils.accepted_range:
+              {min_value: 0, max_value: 1, config: {where: "interval_coverage_p10_p90 is not null"}}
+      - name: selection_rule_id
+        tests: [not_null]
+      - name: telemetry_lag_hours
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0}
+      - name: training_data_source
+        tests:
+          - not_null
+          - accepted_values: {values: ["synthetic", "real"]}
+      - name: config_hash
+        tests: [not_null]

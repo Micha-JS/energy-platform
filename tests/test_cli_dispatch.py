@@ -176,10 +176,16 @@ def test_output_marks_a_declared_run_as_persisted(repo: _StubRepository, tmp_pat
 # -- Argument handling -------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("command", ["dispatch", "forecast"])
 @pytest.mark.parametrize("argv", [["--from", "2024-06-10"], ["--to", "2024-06-12"]])
-def test_from_and_to_must_be_given_together(argv: Sequence[str]) -> None:
+def test_from_and_to_must_be_given_together(command: str, argv: Sequence[str]) -> None:
+    """Both halves, on both commands. A lone ``--to`` that is *ignored* is the dangerous one.
+
+    ``forecast`` persists a declared run: silently dropping the flag would have it overwrite every
+    coverage window's rows while its operator believed they had asked for one ad-hoc range.
+    """
     with pytest.raises(SystemExit, match="must be given together"):
-        cli.main(["dispatch", *argv])
+        cli.main([command, *argv])
 
 
 def test_a_reversed_window_is_refused() -> None:

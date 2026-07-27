@@ -13,6 +13,7 @@ from dagster import (
     schedule,
 )
 
+from energy_platform.config import ARCHIVE_LAG_DAYS
 from energy_platform.orchestration.assets import (
     market_data_assets,
     open_meteo_weather_actuals_raw,
@@ -48,7 +49,10 @@ weather_actuals_job = define_asset_job(
 # schedule chasing yesterday (D-1) would perpetually fetch data that doesn't exist yet and
 # leave failing/empty partitions until a manual re-run. Lag the target day past that horizon;
 # missed days in between are re-materialised when their lag elapses (or by a manual backfill).
-ARCHIVE_LAG_DAYS = 5
+#
+# The constant itself moved to energy_platform.config at M7: the backtester needs it as the
+# *observation lag* on synthetic telemetry and cannot import this module without importing Dagster.
+# One definition, two readers -- the same rule the coverage windows follow.
 
 
 @schedule(

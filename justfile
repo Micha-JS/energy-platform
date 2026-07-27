@@ -53,10 +53,17 @@ dbt-deps:
 # layer and its tests are built on, then capture the recorded forecast vintage -- whose issue date
 # is derived from the fixture, so it describes the payload it carries. Uses the app CLI (root
 # env), not the dbt env.
+#
+# The synthetic vintages stop two days short of each window's end on purpose: a vintage issued on I
+# degrades the archive weather for its own 48-hour horizon, so it needs I, I+1 and I+2 ingested, and
+# the fixtures end with the window. Target days left without an eligible vintage get no prediction
+# rather than a fabricated one -- see forecasting/vintage.py.
 dbt-seed:
-    uv run energy-platform backfill --offline --from 2024-03-28 --to 2024-04-03 --datasets price,load,weather,telemetry
+    uv run energy-platform backfill --offline --from 2024-03-28 --to 2024-06-30 --datasets price,load,weather,telemetry
     uv run energy-platform backfill --offline --from 2024-10-24 --to 2024-10-30 --datasets price,load,weather,telemetry
     uv run energy-platform forecast-snapshot --offline
+    uv run energy-platform forecast-backfill --issue-from 2024-03-28 --issue-to 2024-06-28
+    uv run energy-platform forecast-backfill --issue-from 2024-10-24 --issue-to 2024-10-28
 
 # Build all dbt models and run every test (generic, singular DST, freshness-free).
 #
@@ -81,14 +88,37 @@ dbt-build:
 dispatch *ARGS:
     uv run energy-platform dispatch {{ARGS}}
 
-# The full warehouse in dependency order: models, then the optimiser, then the dispatch mart.
-# This is what CI runs, and the only sequence that works on an empty database.
+# Backtest the M7 forecast models over every declared coverage window and write the runs and
+# predictions to the `derived` schema. Reads mart_hourly_energy AND stg_weather_forecast, so it runs
+# after a dbt build and before mart_forecast_eval -- same sandwich as `dispatch`.
+#
+# OMP_NUM_THREADS=1 is not decoration: HistGradientBoosting accumulates histograms across threads,
+# so the float summation order -- and the last bits of every split threshold -- follow the thread
+# count. Pinning it is what makes a re-fit on one machine reproduce.
+#
+# --from/--to backtests an ad-hoc window and reports it WITHOUT writing, exactly as `dispatch` does.
+# Example: just forecast --target pv_production_kwh
+forecast *ARGS:
+    OMP_NUM_THREADS=1 uv run energy-platform forecast {{ARGS}}
+
+# Drop the synthetic forecast vintages so a changed generator can be re-seeded. The raw zone is
+# append-only and vintages are keyed on content with a pinned issue_time, so a regenerated vintage
+# would otherwise collide with its predecessor on stg_weather_forecast's uniqueness test with no
+# way to remove it. Bump GENERATOR_VERSION and run this. Real open_meteo vintages are untouched --
+# those genuinely cannot be regenerated.
+forecast-reset:
+    docker compose exec -T postgres psql -U dagster -d dagster -c \
+        "delete from raw.forecast_ingestion where source = 'synthetic'"
+
+# The full warehouse in dependency order: models, then the two Python steps, then the marts that
+# read what they wrote. This is what CI runs, and the only sequence that works on an empty database.
 warehouse:
     uv run --project dbt dbt build --project-dir dbt --profiles-dir dbt \
-        --exclude mart_dispatch_comparison
+        --exclude mart_dispatch_comparison mart_forecast_eval
     uv run energy-platform dispatch
+    OMP_NUM_THREADS=1 uv run energy-platform forecast
     uv run --project dbt dbt build --project-dir dbt --profiles-dir dbt \
-        --select mart_dispatch_comparison
+        --select mart_dispatch_comparison mart_forecast_eval
 
 # Assert the Python tariff engine and the dbt tariff macro compute the same money, hour by hour,
 # over the built warehouse -- plus the no-lookahead manifest guard. Needs `just dbt-build` first;

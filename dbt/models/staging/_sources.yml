@@ -54,3 +54,17 @@ sources:
           The hourly schedule behind each run -- flows, state of charge, and per-hour money.
           `is_priced` marks the hours every term was present for, exactly as
           int_hourly_tariff_cost does, so the two layers aggregate on the same flag.
+      - name: forecast_runs
+        description: >
+          One row per (site, target, model, window) backtested by `energy-platform forecast`,
+          carrying the provenance a prediction is traceable through: config_hash over the fit's
+          inputs, the vintage-selection and persistence rule ids, the observation lag, the
+          training data source, and the library versions. `role` distinguishes a model from a
+          baseline and from the ORACLE -- on synthetic windows the flat-plate PV model is the
+          process that generated the labels, so it wins by tautology and must not be ranked
+          against the others.
+      - name: forecast_predictions
+        description: >
+          One row per (run, hour): p10/p50/p90 and the actual, with the issue instant and the
+          vintage the features came from. Null where a model made no prediction or no actual
+          exists -- a gap is never scored as a zero.

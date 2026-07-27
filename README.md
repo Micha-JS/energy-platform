@@ -6,7 +6,16 @@
 German day-ahead market data + real PV/battery telemetry (Fenecon Home 10, 8.8 kWp /
 14 kWh) → warehouse → dbt marts → battery dispatch optimizer → ML forecasts → dashboard.
 
-> **Status: M6 — the dispatch optimizer.** A MILP (HiGHS via PuLP) computes the
+> **Status: M7 — ML forecasting.** Day-ahead hourly PV and load forecasts, evaluated against
+> persistence and seasonal-naive baselines in `mart_forecast_eval`. The deliverable is the
+> *harness*, not an accuracy number: a backtester that provably rejects a leaked feature (four
+> deliberate cheating attempts, plus a positive control), one vintage-selection rule stated once
+> and enforced everywhere, and an observation lag that makes "persistence = yesterday" the lookahead
+> it actually is on this platform. On seeded synthetic data the flat-plate PV model is the *oracle* —
+> it generated the labels — so the mart labels it `role='oracle'` rather than letting it be ranked.
+> Details in [ML forecasting (M7)](#ml-forecasting-m7). Previously:
+>
+> **M6 — the dispatch optimizer.** A MILP (HiGHS via PuLP) computes the
 > *hindsight-optimal* battery schedule for every covered week under each tariff, using the same
 > `BatteryConfig` the synthetic generator simulates and the same tariff engine the economics marts
 > price with — so `mart_dispatch_comparison` compares four dispatches on identical physics and
@@ -248,8 +257,13 @@ Design decisions worth calling out:
 - **Money is exact decimal, cast to float at the boundary.** Computed in floating point, the price
   stack returns 13.316099999999997 where 13.3161 was meant, and that noise accumulates through every
   monthly sum. The arithmetic runs in `numeric`; the column type stays `double precision`.
-- **Partial months are flagged, never presented as whole ones.** The demo seeds two week-long
-  windows, so *no* month in the warehouse is complete. Every monthly row carries `expected_hours`
+- **Partial months are flagged, never presented as whole ones.** Since M7 extended the seeded
+  coverage to a contiguous spring quarter, April and May *are* complete (720/720 and 744/744) while
+  March, June and October are not — so the pro-rating finally exercises both branches rather than
+  only the partial one. June is the interesting case: it is fully *covered* at 720/720 and still
+  flagged partial, because one hour is priced 719/720. That hour is the hand-injected `null` in the
+  curated `2024-06-12` fixture, which the extended window swallowed — a real gap, surfaced rather
+  than smoothed, exactly as intended. Every monthly row carries `expected_hours`
   (the DST-correct calendar length — 743 in March, 745 in October, derived from the calendar and
   never counted from the rows under test), `covered_hours`, `priced_hours`, `completeness_ratio`,
   and `is_partial_month`. The Grundpreis is pro-rated to match, with the full monthly fee kept
@@ -288,7 +302,10 @@ just dispatch     # re-solve on an already-built warehouse
 
 ### The headline, honestly
 
-Over the two seeded weeks (167 + 169 hours — the DST weeks, so not 336):
+Over the two seeded DST weeks (167 + 169 hours — so not 336). M7 added a third, contiguous spring
+window (2024-04-04..06-30) deliberately *without* disturbing these two, so every number below is
+unchanged; over that window the battery is worth a further €71 and optimal dispatch adds €0.28 on
+top of naive:
 
 | | over the covered weeks | very rough annualisation |
 | --- | --- | --- |
@@ -332,8 +349,8 @@ Design decisions worth calling out:
   Battery exclusivity is a *guarantee against degeneracy* — the test asserts that dropping it alone
   leaves the optimal value unchanged, which is the honest claim. Optimal solutions are non-unique,
   and which vertex a simplex returns is not something a model gets to promise; the binary turns "the
-  solver happens not to" into "the formulation does not permit it", for ~336 binaries HiGHS closes
-  in milliseconds. Big-Ms come from each hour's own PV and load, and are attached to the exclusivity
+  solver happens not to" into "the formulation does not permit it", for ~336 binaries on a week —
+  or ~4 200 on M7's 88-day window, which HiGHS still closes in about a second. Big-Ms come from each hour's own PV and load, and are attached to the exclusivity
   constraints only — putting them on the variable bounds as well would have kept the relaxation
   finite and hidden the pathology.
 - **`SoC_end ≥ SoC_start` is a trap: it is vacuous.** Without any boundary condition, hindsight
@@ -352,6 +369,15 @@ Design decisions worth calling out:
   `SoC_end = SoC_start` constraint would have pushed both out of the feasible set and left the
   property test asserting something that could legitimately fail. `naive_telemetered` is not
   feasible — its SoC jumps at midnight — and is deliberately excluded from that assertion.
+- **The optimality bound is stated in money, not as a fraction — and M7 is how we found out.**
+  HiGHS defaults to a *relative* MIP gap of 1e-4, which is a slack budget that scales with the
+  objective. At one-week windows the objective was ~€-9 and that bought ~0.9 mEUR, invisible. When
+  M7's 88-day window pushed it to ~€-194, the same fraction bought ~19 mEUR, and HiGHS stopped —
+  entirely correctly — at a schedule costing 2.8 mEUR *more* than `naive_continuous`, which
+  `assert_optimal_never_costs_more_than_naive` duly reported as a violated theorem. The gap is now
+  absolute (1e-7 EUR, below settlement's own rounding) with the relative gap pinned to zero. This
+  was a latent M6 defect rather than an M7 one: it was always wrong to let the optimality bound
+  scale with the window, and a longer window is simply what made it visible.
 - **Ingestion is bit-reproducible; optimization results are not, and the repo says so.** This is the
   first component the raw zone's content-hash contract deliberately does not cover. The optimal
   *value* is unique; the optimal *schedule* generally is not, so a re-solve may legitimately return a
@@ -363,8 +389,134 @@ Design decisions worth calling out:
 - **Coverage windows are read from `dbt_project.yml`, not copied.** The optimizer parses the same
   `coverage_windows` var the hourly spine is generated from — the same "one file, two readers"
   pattern the tariff catalogue uses — so the two cannot drift. It also means the windows are
-  DST-correct on both sides: 167 hours and 169, never 7 × 24, and a mart short of that count fails
-  rather than being optimized as if it were whole.
+  DST-correct on both sides: 167 hours and 169 for the two DST weeks — never 7 × 24 — and a mart
+  short of that count fails rather than being optimized as if it were whole. Windows must not
+  overlap, since the spine expands `generate_series` per window with no `UNION`; the spring window
+  abuts the March one exactly, and a test asserts the whole declared set stays disjoint.
+
+## ML forecasting (M7)
+
+[`src/energy_platform/forecasting/`](src/energy_platform/forecasting/) produces day-ahead hourly PV
+and household-load forecasts and scores them in `mart_forecast_eval`, beside the naive baselines
+they have to beat. Everything below runs on the synthetic demo data, and the section is careful
+about which of it is a claim about forecasting and which is a claim about the simulator.
+
+| `model_key` | role | what it is |
+| --- | --- | --- |
+| `persistence` | baseline | same local hour of the most recent **observable** day |
+| `seasonal_naive` | baseline | same local hour of the most recent observable **same weekday** |
+| `toy_physical` | **oracle** | M3's flat-plate model — *the process that generated the labels* |
+| `pvlib_physical` | model | full plane-of-array chain: solar position → Hay-Davies → cell temperature → PVWatts |
+| `pvlib_hgb` | model | the above plus a gradient-boosted residual correction, p10/p50/p90 |
+| `load_hgb` | model | gradient boosting on calendar, solar geometry and forecast temperature |
+
+```bash
+just dbt-seed      # prices, weather, telemetry + synthetic forecast vintages
+just warehouse     # dbt -> dispatch -> forecast -> the two marts that read them back
+just forecast --target pv_production_kwh   # re-run one target
+```
+
+### What the seeded numbers say, and what they don't
+
+Mean absolute error over the spring window, 216 scored hours per model:
+
+| target | model | role | MAE (kWh) |
+| --- | --- | --- | --- |
+| load | `load_hgb` | model | **0.0302** |
+| load | `seasonal_naive` | baseline | 0.0314 |
+| load | `persistence` | baseline | 0.0338 |
+| pv | `toy_physical` | *oracle* | 0.1667 |
+| pv | `pvlib_hgb` | model | **0.1801** |
+| pv | `pvlib_physical` | model | 0.3108 |
+| pv | `seasonal_naive` | baseline | 0.4506 |
+| pv | `persistence` | baseline | 0.4788 |
+
+**The load result is a ceiling, not a win.** M3 generates load as a fixed weekday × hour × month
+profile times `1 + U(−0.12, 0.12)`. That noise is i.i.d. by construction and therefore not
+learnable, so a perfect predictor of the shape still scores `E|U(−a,a)| = a/2` times the mean level
+— **0.0274 kWh** here, in closed form. `load_hgb` reaches 0.0302 against that floor. Matching
+seasonal-naive is the *correct* outcome: seasonal-naive on this data essentially is the generator.
+A model that beat it substantially would be reading something it should not.
+
+**The PV ranking is dominated by geometry, not by skill.** The synthetic truth is
+`dc_kwp × GHI/1000 × PR × temp_derate` — irradiance on a *horizontal* surface, no panel tilt
+anywhere. So `toy_physical` is not a competitor, it is the oracle, and `pvlib_physical` transposing
+onto a 35° south-facing plane is biased against a truth that has no plane: on a clear April day the
+tilted model collects **10% more** than the flat one. That is correct physics losing to a toy for
+reasons that have nothing to do with forecasting.
+
+`pvlib_hgb` fits the **residual** against that chain, and the number to read is the gap it closes,
+not its rank: 0.3108 → 0.1801 is the boosting learning most of the transposition back off again. It
+does not reach the oracle and should not — the oracle *is* the generator, and the only way past it
+is to read the labels. A hybrid that beat 0.1667 on this data would be evidence of a leak, which is
+why the ranking is reported with the oracle in it rather than filtered down to a flattering top row.
+
+Design decisions worth calling out:
+
+- **The oracle is a column, not a footnote.** `mart_forecast_eval.role` marks `toy_physical` as
+  `oracle` on synthetic windows, so ordering the mart by `mae_kwh` without filtering is *visibly*
+  wrong rather than quietly wrong, and `tests/dbt/test_forecast_reconciliation.py` asserts the
+  label. A caveat that lives only in a README is a caveat that gets skipped by whoever builds the
+  chart.
+- **A window too short to judge a model on reports baselines and no model.** The two DST weeks are
+  seven days with no history behind them, so `seasonal_naive` can never resolve an equivalent hour
+  there and nothing can be fitted. They appear in `mart_forecast_eval` with their baselines and
+  nothing else — not omitted, which would let `assert_baselines_exist_for_every_model` pass over a
+  window nobody could see was missing, and not padded with physical models, which would put a model
+  row in the mart with no baseline beside it.
+- **M7 ships a falsifiable prediction.** On real Fenecon telemetry the PV ranking should *invert* —
+  a real array is tilted, so plane-of-array physics recovers accuracy exactly where the flat-plate
+  toy loses it. That is checkable once the private telemetry accumulates, and it is a better claim
+  than any number this table could contain.
+- **A synthetic-trained model is refused for real prediction.** The residual model has learned to
+  undo a transposition real data needs; outside the simulator that is a confident error, not
+  knowledge. Every artifact records its `training_data_source` and `load_artifact` raises rather
+  than warning. The known limitation is an interlock, not a note.
+- **"Persistence = yesterday" is lookahead here, and the harness says so.** Synthetic telemetry is
+  generated from ERA5-backed archive weather that settles ~5 days late, so yesterday's PV has not
+  been observed when today's forecast is issued. Baselines walk back to the most recent
+  *observable* equivalent hour — six or seven days, not one. A harness that allowed the textbook
+  version would report a baseline nothing could honestly beat.
+- **The vintage rule is stated once and enforced everywhere.** *For target Berlin day D, use the
+  last stored vintage whose `issue_time` is strictly before D 00:00 Europe/Berlin.* One function,
+  reusing the same `berlin_day_window` the hourly spine and the coverage windows use, so DST is
+  handled in one place. The rule id is persisted on every prediction row.
+- **The lookahead test is the milestone.** `tests/forecasting/test_lookahead_rejection.py` makes
+  four deliberate attempts to cheat — reading the target hour's own actual, a vintage issued after
+  the prediction, a lag shorter than the observation lag, and a feature that declines to declare
+  when it became knowable — and asserts each is refused. It ships with a **positive control**,
+  because a checker that rejected everything would pass all four.
+- **DNI is recovered exactly, not decomposed.** Open-Meteo's `direct_radiation` is direct
+  *horizontal* irradiance, so `DNI = direct_radiation / cos(zenith)`. The usual physical hybrid has
+  to estimate DNI with Erbs or DISC and inherit that model's error; this one does not, because M2
+  ingested all three components. It is also why the synthetic vintage generator scales all three by
+  one shared factor — perturbing them independently would break the identity silently.
+- **Synthetic forecast vintages exist because real ones cannot be backfilled.** Open-Meteo serves
+  only the current issue, so the demo had a forecast in 2026 and telemetry in 2024 and no overlap
+  at all. The generator degrades archive actuals with a per-vintage regime offset and lead-time-
+  growing noise — correlated, because white noise would be averaged away and make a residual
+  correction look far better than a real one ever does. It is stdlib-only and content-hashed like
+  every other producer, and it is deliberately **never scheduled**: it reconstructs an issue-time
+  snapshot from data that settles days *after* the instant it claims.
+- **Intervals are reported, never claimed.** p10/p90 coverage lands at 0.84 for PV and 0.71 for
+  load against a target of 0.80. The p10 fit is driven by a few hundred tail rows, so the honest
+  move is to print the number rather than assert calibration.
+- **The dependency cost is contained, and the containment is tested.** pvlib and scikit-learn bring
+  numpy, pandas and scipy — the cost M6 declined to pay for linopy. `tests/test_import_containment.py`
+  walks the AST of every first-party module and fails if any of them is imported outside
+  `forecasting/`, plus a subprocess check that importing the CLI does not load them and a positive
+  control that `forecasting/` does. The claim is precise: no *first-party* module outside
+  `forecasting/` touches the scientific stack. Not that the process is numpy-free — highspy has
+  pulled numpy in since M6, and stretching the claim to cover that would make it false.
+- **Model training is a third, weaker determinism tier — and `random_state` is not the lever.**
+  It governs binning subsampling (inert below 200 000 samples) and the early-stopping split, which
+  is off below 10 000 samples. What actually moves the last bits of every split threshold is
+  OpenMP: histogram accumulation is threaded, so summation order follows `OMP_NUM_THREADS`. It is
+  pinned to 1 in `just forecast` and in CI, `early_stopping` is set explicitly rather than left to
+  a default that changes with the data size, and the claim is: same thread count and library
+  versions → identical predictions; different thread count → identical metrics to reported
+  precision, not identical bits. The `config_hash` covers the fit's *inputs*, never the fitted
+  bytes.
 
 ## Engineering invariants
 
@@ -374,9 +526,11 @@ Design decisions worth calling out:
   prediction time.
 - **NaN over fabrication** — missing intervals stay missing and are surfaced by dbt tests.
 - **Reproducible builds** — `uv.lock` committed; CI and the Docker image install `--frozen`.
-- **Claims are scoped to what holds** — ingestion is bit-reproducible and content-hashed;
-  optimization results are value-stable but explicitly *not* hash-guaranteed, because an optimal
-  schedule is not unique. Stretching one invariant to cover both would make it false.
+- **Claims are scoped to what holds** — three tiers, deliberately not one. Ingestion is
+  bit-reproducible and content-hashed. Optimization results are value-stable but explicitly *not*
+  hash-guaranteed, because an optimal schedule is not unique. Model training is weaker still:
+  bit-reproducible only at a pinned thread count, with no cross-platform claim at all. Stretching
+  any one of these to cover the others would make it false.
 
 ## Privacy
 
@@ -405,6 +559,8 @@ just demo-down   # stop and drop the Postgres volume
 | `just backfill`  | load market + weather history into the raw zone |
 | `just dbt-seed`  | offline-seed the raw zone (recorded fixtures)  |
 | `just dbt-build` | build dbt models + run all tests               |
+| `just forecast`  | backtest the forecast models (`OMP_NUM_THREADS=1`) |
+| `just forecast-reset` | drop synthetic vintages so a changed generator can re-seed |
 | `just dbt-reconcile` | assert the Python tariff engine matches the SQL |
 | `just dbt-docs`  | generate the dbt docs site                     |
 | `just lock`      | regenerate `uv.lock` after changing deps       |
@@ -415,8 +571,8 @@ seed the stack.
 
 CI runs the full quality gate (against a Postgres service container, so the raw-zone
 idempotency tests execute), a `dbt` job that rebuilds and tests the warehouse on offline-seeded
-data, solves the dispatch optimizer, builds the dispatch mart, and then runs the warehouse guards —
-the no-lookahead manifest check and the Python↔SQL tariff and dispatch reconciliations, all of which
+data, solves the dispatch optimizer, backtests the forecast models, builds the dispatch and forecast marts, and then runs the warehouse guards —
+the no-lookahead manifest check and the Python↔SQL tariff, dispatch and forecast-metric reconciliations, all of which
 hard-fail rather than skip there — and `docker compose config`
 validation on every push and PR; the dbt docs site publishes to GitHub Pages on merge to main.
 

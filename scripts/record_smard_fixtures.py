@@ -20,7 +20,13 @@ import httpx
 
 # The two M4 CI windows plus a normal reference day are the shared fixture contract; endpoints
 # suffice for SMARD's weekly files (both DST Sundays fall inside their window).
-from _fixture_windows import MARCH_WINDOW, NORMAL_DAY, OCTOBER_WINDOW, expand_days
+from _fixture_windows import (
+    MARCH_WINDOW,
+    NORMAL_DAY,
+    OCTOBER_WINDOW,
+    SPRING_WINDOW,
+    expand_days,
+)
 
 from energy_platform.connectors.smard import SmardClient
 from energy_platform.connectors.types import Resolution
@@ -30,7 +36,8 @@ BASE_URL = "https://www.smard.de/app/chart_data"
 REGION = "DE"
 FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "connectors" / "fixtures"
 
-_WINDOW_DAYS = [NORMAL_DAY, *expand_days(MARCH_WINDOW, OCTOBER_WINDOW)]
+# NORMAL_DAY as a one-day span so expand_days dedupes it -- SPRING_WINDOW now contains it.
+_WINDOW_DAYS = expand_days((NORMAL_DAY, NORMAL_DAY), MARCH_WINDOW, SPRING_WINDOW, OCTOBER_WINDOW)
 
 # (filter_id, resolution, representative days to cover). Hourly spans both full windows; the
 # quarter-hour series only needs the DST Sundays the unit tests assert on.

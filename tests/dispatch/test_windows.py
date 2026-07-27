@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 from datetime import date
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -23,14 +24,25 @@ from energy_platform.dispatch.windows import (
 )
 
 
-def test_the_shipped_project_declares_the_two_seeded_dst_windows() -> None:
+def test_the_shipped_project_declares_the_seeded_windows() -> None:
     """Reads the real file: if the var moves, this fails rather than the optimiser idling."""
     windows = load_coverage_windows()
 
     assert windows == (
         CoverageWindow(start=date(2024, 3, 28), end=date(2024, 4, 3)),
+        CoverageWindow(start=date(2024, 4, 4), end=date(2024, 6, 30)),
         CoverageWindow(start=date(2024, 10, 24), end=date(2024, 10, 30)),
     )
+
+
+def test_the_declared_windows_do_not_overlap() -> None:
+    """int_hourly_spine expands generate_series per window with no UNION, so an overlap silently
+    doubles every hour in the intersection -- and every downstream total with it. Adjacency is
+    fine and deliberate (the March and spring windows abut), overlap is not."""
+    windows = load_coverage_windows()
+
+    for earlier, later in pairwise(windows):
+        assert earlier.end < later.start, f"{earlier} overlaps {later}"
 
 
 def test_the_windows_are_23_and_25_hour_weeks_not_168_hour_ones() -> None:
@@ -39,10 +51,14 @@ def test_the_windows_are_23_and_25_hour_weeks_not_168_hour_ones() -> None:
     The March window contains the spring-forward Sunday and is 167 hours; the October window
     contains fall-back and is 169. A naive ``7 * 24`` would be wrong in both directions, and a count
     taken from the data would shrink in lockstep with a truncated mart and pass by silence.
+
+    The spring window in between transitions nowhere, so it is a plain 88 * 24 -- which is what
+    makes the other two numbers evidence about DST rather than about arithmetic.
     """
-    march, october = load_coverage_windows()
+    march, spring, october = load_coverage_windows()
 
     assert march.expected_hours == 167
+    assert spring.expected_hours == 88 * 24
     assert october.expected_hours == 169
 
 

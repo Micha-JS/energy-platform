@@ -15,8 +15,8 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from energy_platform.connectors.base import MarketDataConnector
-from energy_platform.connectors.open_meteo import WEATHER_VARIABLES, OpenMeteoForecastClient
+from energy_platform.connectors.base import ForecastConnector, MarketDataConnector
+from energy_platform.connectors.open_meteo import WEATHER_VARIABLES
 from energy_platform.connectors.synthetic import WEATHER_SOURCE
 from energy_platform.connectors.types import Dataset, Point, Resolution, UtcWindow
 from energy_platform.orchestration.raw_zone import (
@@ -155,13 +155,16 @@ def require_weather_ingested(
     days: Sequence[date],
     *,
     resolution: Resolution = Resolution.HOUR,
+    consumer: str = "telemetry",
     hint: str | None = None,
 ) -> None:
     """Raise :class:`WeatherDependencyError` if any of ``days`` lacks ingested weather.
 
     Probes the shortwave-radiation series (the irradiance PV derives from); presence of its latest
     hash is the signal that the day's weather actuals are in the raw zone. ``hint`` appends
-    entry-point-specific remediation advice to the message.
+    entry-point-specific remediation advice to the message, and ``consumer`` names what is being
+    blocked -- two producers depend on weather now, and "telemetry requires..." in front of a
+    failed vintage generation sends the reader to the wrong command.
     """
     probe = Dataset.SHORTWAVE_RADIATION.value
     missing = [
@@ -172,7 +175,7 @@ def require_weather_ingested(
     if not missing:
         return
     message = (
-        f"telemetry requires ingested weather for site '{site_id}', but "
+        f"{consumer} requires ingested weather for site '{site_id}', but "
         f"{len(missing)} of {len(days)} day(s) have none (first: {missing[0].isoformat()})."
     )
     if hint:
@@ -267,7 +270,7 @@ def _require_targets_within_horizon(
 
 
 def ingest_forecast_vintage(
-    client: OpenMeteoForecastClient,
+    client: ForecastConnector,
     repo: RawZoneRepository,
     site_id: str,
     resolution: Resolution,
@@ -277,10 +280,14 @@ def ingest_forecast_vintage(
     variables: Sequence[Dataset] = WEATHER_VARIABLES,
     dagster_run_id: str | None = None,
 ) -> ForecastIngestResult:
-    """Fetch the current forecast horizon and persist it as one immutable vintage.
+    """Fetch a forecast horizon and persist it as one immutable vintage.
 
     ``issue_time`` is the caller-supplied as-of instant (``datetime.now(UTC)`` in production, a
     fixed instant in tests), stored so backtests can reconstruct exactly what was known when.
+
+    Typed against :class:`~energy_platform.connectors.base.ForecastConnector` rather than the
+    Open-Meteo client since M7, so the synthetic vintage generator lands through this same path --
+    one content-hash contract, one horizon check, one write, whichever producer ran.
     """
     forecast = client.fetch_forecast(site_id, resolution, variables)
     _require_targets_within_horizon(forecast.series, issue_day, client.forecast_days)

@@ -24,12 +24,24 @@ DEFAULT_RAW_SCHEMA = "raw"
 #                Replace-on-rerun, NOT append-with-hash: an optimal schedule is not unique, so a
 #                re-solve returning a different one is correct rather than a revision to preserve.
 DEFAULT_MARTS_SCHEMA = "analytics_marts"
+DEFAULT_STAGING_SCHEMA = "analytics_staging"
 DEFAULT_DERIVED_SCHEMA = "derived"
 
 # Public Open-Meteo API base URLs (no API key required, CC BY 4.0).
 DEFAULT_OPEN_METEO_ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 DEFAULT_OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 DEFAULT_FORECAST_DAYS = 7
+
+# The Open-Meteo archive is ERA5-backed and only finalises a few days after the fact, so nothing
+# downstream of it can know an hour's value until this much later. Two consumers, deliberately one
+# definition: the Dagster schedules target `today - ARCHIVE_LAG_DAYS` rather than chasing yesterday
+# into empty partitions (energy_platform.orchestration.schedules), and M7's backtester treats it as
+# the *observation lag* -- synthetic telemetry is generated from this weather, so an hour of
+# synthetic telemetry is not knowable until the weather behind it has settled. A "same hour
+# yesterday" persistence baseline is therefore itself lookahead on this platform, which is the sort
+# of thing that stays true only while the two numbers cannot drift apart.
+ARCHIVE_LAG_DAYS = 5
+DEFAULT_TELEMETRY_LAG_HOURS = ARCHIVE_LAG_DAYS * 24
 
 # The site's coordinates, rounded to ~2 decimal places (~1 km) so the public repo never
 # reveals a precise address. These rounded literals are the ONLY coordinates anywhere in the
@@ -48,6 +60,14 @@ DEFAULT_PV_AC_CAP_KW = 8.0
 DEFAULT_PV_PERFORMANCE_RATIO = 0.82
 DEFAULT_PV_TEMP_COEFF_PER_C = -0.004
 DEFAULT_BATTERY_CAPACITY_KWH = 14.0
+
+# Panel orientation, added at M7 for the pvlib plane-of-array model. Committed as ordinary config
+# for the same reason the nameplate ratings are: an array's tilt and bearing say nothing about where
+# it is -- half the pitched roofs in Germany are within a few degrees of these -- while the site's
+# coordinates stay rounded above. 35 degrees is a conventional German roof pitch; 180 is due south
+# in pvlib's convention (0 = north, clockwise).
+DEFAULT_PV_TILT_DEG = 35.0
+DEFAULT_PV_AZIMUTH_DEG = 180.0
 
 # Which rows of the tariff catalogue (dbt/seeds/tariffs.csv) are in force. Only *ids* live here
 # -- the rates themselves live in the catalogue, which dbt seeds and the Python engine reads, so
@@ -132,6 +152,12 @@ class PostgresConfig:
     ``derived_schema`` is where the optimiser's own results land for dbt to read back as a source;
     it must match the ``derived`` source's schema in ``dbt/models/staging/_sources.yml``, which
     resolves the same ``ENERGY_DERIVED_SCHEMA`` variable.
+
+    ``staging_schema`` is read by exactly one caller: M7's backtester, which needs the forecast
+    vintages that ``stg_weather_forecast`` pivots. It reads that view rather than the raw table
+    on purpose -- ``tests/dbt/test_no_lookahead.py`` permits exactly one *dbt model* to select from
+    ``raw.forecast_observations``, and going around it in Python would honour the letter of that
+    guard while defeating its point.
     """
 
     host: str = "localhost"
@@ -141,6 +167,7 @@ class PostgresConfig:
     database: str = "dagster"
     schema: str = DEFAULT_RAW_SCHEMA
     marts_schema: str = DEFAULT_MARTS_SCHEMA
+    staging_schema: str = DEFAULT_STAGING_SCHEMA
     derived_schema: str = DEFAULT_DERIVED_SCHEMA
 
     @classmethod
@@ -153,6 +180,7 @@ class PostgresConfig:
             database=_env("ENERGY_PG_DB", "DAGSTER_POSTGRES_DB", default="dagster"),
             schema=_env("ENERGY_RAW_SCHEMA", default=DEFAULT_RAW_SCHEMA),
             marts_schema=_env("ENERGY_MARTS_SCHEMA", default=DEFAULT_MARTS_SCHEMA),
+            staging_schema=_env("ENERGY_STAGING_SCHEMA", default=DEFAULT_STAGING_SCHEMA),
             derived_schema=_env("ENERGY_DERIVED_SCHEMA", default=DEFAULT_DERIVED_SCHEMA),
         )
 
@@ -269,12 +297,20 @@ class PvSystemConfig:
     (~0.80-0.85 conventionally) folds soiling, wiring, and inverter losses into one factor;
     ``temp_coeff_per_c`` (~-0.004 /degC for silicon) is the linear power derate away from the
     25 degC reference cell temperature.
+
+    ``tilt_deg`` / ``azimuth_deg`` are used only by M7's pvlib plane-of-array model. The M3
+    generator ignores them, and that asymmetry is load-bearing rather than an oversight: M3's PV is
+    a flat-plate function of *horizontal* irradiance, so on synthetic data the tilted model is
+    biased against a truth that has no tilt. See the M7 README section -- the toy model is the
+    oracle there, not a competitor.
     """
 
     dc_kwp: float = DEFAULT_PV_DC_KWP
     ac_cap_kw: float = DEFAULT_PV_AC_CAP_KW
     performance_ratio: float = DEFAULT_PV_PERFORMANCE_RATIO
     temp_coeff_per_c: float = DEFAULT_PV_TEMP_COEFF_PER_C
+    tilt_deg: float = DEFAULT_PV_TILT_DEG
+    azimuth_deg: float = DEFAULT_PV_AZIMUTH_DEG
 
     @classmethod
     def from_env(cls) -> PvSystemConfig:
@@ -287,6 +323,8 @@ class PvSystemConfig:
             temp_coeff_per_c=_env_float(
                 "ENERGY_PV_TEMP_COEFF_PER_C", default=str(DEFAULT_PV_TEMP_COEFF_PER_C)
             ),
+            tilt_deg=_env_float("ENERGY_PV_TILT_DEG", default=str(DEFAULT_PV_TILT_DEG)),
+            azimuth_deg=_env_float("ENERGY_PV_AZIMUTH_DEG", default=str(DEFAULT_PV_AZIMUTH_DEG)),
         )
 
 
@@ -339,6 +377,116 @@ class SyntheticConfig:
         return cls(
             salt=_env("ENERGY_SYNTHETIC_SALT", default="energy-platform-synthetic-v1"),
             annual_load_kwh=_env_float("ENERGY_SYNTHETIC_ANNUAL_LOAD_KWH", default="4000"),
+        )
+
+
+# Telemetry producers, by the `source` they write into the raw zone. Spelled as literals rather
+# than imported from the connectors, because config is the bottom layer everything else imports;
+# the connectors' own SOURCE constants are the authority and these must match them.
+TELEMETRY_SOURCE_SYNTHETIC = "synthetic"
+TELEMETRY_SOURCE_FENECON = "fenecon"
+
+# Forecast vintage producers, by the `source` they write. Deliberately the same spelling as the
+# telemetry producers where they coincide: 'synthetic' means reconstructed either way.
+FORECAST_SOURCE_SYNTHETIC = "synthetic"
+FORECAST_SOURCE_OPEN_METEO = "open_meteo"
+
+DEFAULT_FORECAST_SEED = 0
+DEFAULT_MIN_TRAIN_DAYS = 28
+DEFAULT_FOLD_STRIDE_DAYS = 7
+DEFAULT_ARTIFACT_DIR = "artifacts/forecasting"
+
+
+def _default_lag_hours(telemetry_source: str) -> int:
+    """How long after an hour its telemetry becomes knowable, per producer.
+
+    Synthetic telemetry is generated *from* ingested archive weather, so it inherits ERA5's settling
+    delay in full -- it cannot exist before the weather behind it does. A real house has no such
+    delay: Home Assistant reports the current instant.
+    """
+    return 0 if telemetry_source == TELEMETRY_SOURCE_FENECON else DEFAULT_TELEMETRY_LAG_HOURS
+
+
+def _default_forecast_source(telemetry_source: str) -> str:
+    """Which vintage producer pairs with a telemetry producer.
+
+    Derived rather than configured independently because the two are not free to disagree: scoring
+    a real house against reconstructed vintages -- or the simulator against forecasts issued for a
+    different reality -- measures nothing. It stays overridable for the one case that is coherent,
+    scoring synthetic telemetry against genuinely accumulated Open-Meteo vintages once enough of
+    them exist.
+    """
+    return (
+        FORECAST_SOURCE_OPEN_METEO
+        if telemetry_source == TELEMETRY_SOURCE_FENECON
+        else FORECAST_SOURCE_SYNTHETIC
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ForecastConfig:
+    """The M7 backtester's parameters.
+
+    ``telemetry_source`` mirrors the dbt var of the same name and selects which producer's history
+    the models are trained and scored against. It also decides three things that must never be set
+    independently of it:
+
+    * ``forecast_source`` -- which vintage producer supplies the weather features
+      (see :func:`_default_forecast_source`). Note there is deliberately **no dbt var** for this:
+      ``stg_weather_forecast`` already carries ``source`` in its grain, and no dbt model ever
+      collapses the vintage dimension, so the only place the choice has to be made is where the
+      vintages are actually read -- here.
+
+    * ``telemetry_lag_hours`` -- the observation lag (see :func:`_default_lag_hours`). Overridable,
+      because a real deployment might buffer, but the default is derived so it cannot drift from
+      ``ARCHIVE_LAG_DAYS``.
+    * ``training_data_source`` -- whether a fitted model saw simulated or real physics. This is
+      stamped into every artifact and every prediction row, and real-mode prediction *refuses* a
+      synthetic-trained artifact. A residual model fitted on synthetic windows has learned to undo
+      a plane-of-array transposition that a real tilted array does not need undone; outside the
+      simulator that is not knowledge, it is a systematic error with a confident face on it.
+
+    ``seed`` and the fold geometry are part of the reproducibility statement rather than tuning
+    knobs: they are hashed into ``config_hash`` so a prediction row names the experiment that
+    produced it.
+    """
+
+    telemetry_source: str = TELEMETRY_SOURCE_SYNTHETIC
+    forecast_source: str = FORECAST_SOURCE_SYNTHETIC
+    telemetry_lag_hours: int = DEFAULT_TELEMETRY_LAG_HOURS
+    seed: int = DEFAULT_FORECAST_SEED
+    min_train_days: int = DEFAULT_MIN_TRAIN_DAYS
+    fold_stride_days: int = DEFAULT_FOLD_STRIDE_DAYS
+    artifact_dir: str = DEFAULT_ARTIFACT_DIR
+
+    @classmethod
+    def from_env(cls) -> ForecastConfig:
+        telemetry_source = _env("ENERGY_TELEMETRY_SOURCE", default=TELEMETRY_SOURCE_SYNTHETIC)
+        return cls(
+            telemetry_source=telemetry_source,
+            forecast_source=_env(
+                "ENERGY_FORECAST_SOURCE", default=_default_forecast_source(telemetry_source)
+            ),
+            telemetry_lag_hours=_env_int(
+                "ENERGY_TELEMETRY_LAG_HOURS", default=str(_default_lag_hours(telemetry_source))
+            ),
+            seed=_env_int("ENERGY_FORECAST_SEED", default=str(DEFAULT_FORECAST_SEED)),
+            min_train_days=_env_int(
+                "ENERGY_FORECAST_MIN_TRAIN_DAYS", default=str(DEFAULT_MIN_TRAIN_DAYS)
+            ),
+            fold_stride_days=_env_int(
+                "ENERGY_FORECAST_FOLD_STRIDE_DAYS", default=str(DEFAULT_FOLD_STRIDE_DAYS)
+            ),
+            artifact_dir=_env("ENERGY_FORECAST_ARTIFACT_DIR", default=DEFAULT_ARTIFACT_DIR),
+        )
+
+    @property
+    def training_data_source(self) -> str:
+        """``'synthetic'`` or ``'real'`` -- the provenance stamp carried by every artifact."""
+        return (
+            TELEMETRY_SOURCE_SYNTHETIC
+            if self.telemetry_source == TELEMETRY_SOURCE_SYNTHETIC
+            else "real"
         )
 
 
@@ -414,6 +562,7 @@ class AppConfig:
     pv: PvSystemConfig
     battery: BatteryConfig
     synthetic: SyntheticConfig
+    forecast: ForecastConfig
     tariffs: TariffConfig
     home_assistant: HomeAssistantConfig
 
@@ -427,6 +576,7 @@ class AppConfig:
             pv=PvSystemConfig.from_env(),
             battery=BatteryConfig.from_env(),
             synthetic=SyntheticConfig.from_env(),
+            forecast=ForecastConfig.from_env(),
             tariffs=TariffConfig.from_env(),
             home_assistant=HomeAssistantConfig.from_env(),
         )
