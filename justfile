@@ -59,8 +59,30 @@ dbt-seed:
     uv run energy-platform forecast-snapshot --offline
 
 # Build all dbt models and run every test (generic, singular DST, freshness-free).
+#
+# NOTE the ordering around `dispatch`: the optimiser reads mart_hourly_energy and writes the
+# `derived` tables that mart_dispatch_comparison reads back, so it sits *between* two dbt runs.
+# `just warehouse` does the whole sequence; this recipe alone assumes the derived tables exist
+# (they are created empty by `energy-platform dispatch`, so a first-ever build needs `warehouse`).
 dbt-build:
     uv run --project dbt dbt build --project-dir dbt --profiles-dir dbt
+
+# Solve the M6 battery dispatch optimiser over every declared coverage window and write the four
+# scenarios to the `derived` schema. Needs mart_hourly_energy, so run after a dbt build.
+# Re-running replaces a window's rows rather than appending -- see dispatch/store.py for why the
+# raw zone's content-hash contract deliberately does not extend here.
+# Example: just dispatch --tariff dynamic_2024
+dispatch *ARGS:
+    uv run energy-platform dispatch {{ARGS}}
+
+# The full warehouse in dependency order: models, then the optimiser, then the dispatch mart.
+# This is what CI runs, and the only sequence that works on an empty database.
+warehouse:
+    uv run --project dbt dbt build --project-dir dbt --profiles-dir dbt \
+        --exclude mart_dispatch_comparison
+    uv run energy-platform dispatch
+    uv run --project dbt dbt build --project-dir dbt --profiles-dir dbt \
+        --select mart_dispatch_comparison
 
 # Assert the Python tariff engine and the dbt tariff macro compute the same money, hour by hour,
 # over the built warehouse -- plus the no-lookahead manifest guard. Needs `just dbt-build` first;

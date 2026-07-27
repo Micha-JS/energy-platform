@@ -11,6 +11,15 @@ dependencies = [
     "dagster-postgres>=0.26,<0.27",
     "psycopg[binary]>=3.2,<4",
     "httpx>=0.27,<0.29",
+    # M6 dispatch optimiser. PuLP is pure Python and only builds the model; highspy is the HiGHS
+    # MILP solver itself (prebuilt wheels, numpy its only runtime dependency). Deliberately not
+    # linopy, whose array API would add numpy+scipy+xarray+dask+polars to express a
+    # one-dimensional time index -- see the M6 design notes in the README.
+    "pulp>=3.0,<4",
+    "highspy>=1.7,<2",
+    # Reads the dbt project's declared coverage_windows var, so the optimiser and the hourly spine
+    # cannot disagree about which windows exist (see energy_platform.dispatch.windows).
+    "pyyaml>=6.0,<7",
 ]
 
 [project.scripts]
@@ -23,6 +32,7 @@ dev = [
     "pytest>=8.3",
     "hypothesis>=6.100",
     "pre-commit>=4.0",
+    "types-pyyaml>=6.0.12.20260724",
 ]
 
 [build-system]
@@ -57,10 +67,16 @@ pretty = true
 module = ["dagster_postgres.*"]
 ignore_missing_imports = true
 
+# PuLP ships no type stubs. The untyped surface is deliberately confined to
+# energy_platform.dispatch.optimizer, which hands typed dataclasses back to everything else.
+[[tool.mypy.overrides]]
+module = ["pulp.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
 addopts = "-ra -q"
 markers = [
-    "postgres: requires a live Postgres database (raw-zone integration tests)",
+    "postgres: requires a live Postgres database (raw-zone and derived-zone integration tests)",
 ]

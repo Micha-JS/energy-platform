@@ -119,11 +119,25 @@ jobs:
           echo "$out" | grep -Eq "loaded=0 noop=[0-9]+ revision=0 .* failures=0" \
             || { echo "::error::re-seed was not an all-noop -- ingestion is not idempotent"; exit 1; }
       - name: dbt build (models + all tests, incl. DST singular tests)
-        run: uv run --project dbt dbt build --project-dir dbt --profiles-dir dbt
-      - name: Warehouse guards (no-lookahead manifest check + Python<->SQL tariff reconciliation)
-        # Both need a built warehouse, so they run here rather than in `quality`, where they skip.
-        # ENERGY_REQUIRE_DBT turns those skips into failures: a reconciliation that silently did
-        # not run is indistinguishable from one that passed.
+        # Everything except the dispatch mart, which reads tables the optimiser has not written yet.
+        # The optimiser consumes a mart and produces a source, so it sits between two dbt runs --
+        # `just warehouse` is this same sequence for local use.
+        run: |
+          uv run --project dbt dbt build --project-dir dbt --profiles-dir dbt \
+            --exclude mart_dispatch_comparison
+      - name: Solve the battery dispatch optimiser over both coverage windows
+        # Reads mart_hourly_energy, writes the `derived` schema. No network, no solver licence:
+        # HiGHS ships as a wheel. Windows come from dbt_project.yml's coverage_windows var, read by
+        # the package itself, so CI cannot drift from the declaration the spine is built on.
+        run: uv run energy-platform dispatch
+      - name: dbt build (the dispatch mart + its tests)
+        run: |
+          uv run --project dbt dbt build --project-dir dbt --profiles-dir dbt \
+            --select mart_dispatch_comparison
+      - name: Warehouse guards (no-lookahead + tariff and dispatch reconciliations)
+        # All three need a built warehouse, so they run here rather than in `quality`, where they
+        # skip. ENERGY_REQUIRE_DBT turns those skips into failures: a reconciliation that silently
+        # did not run is indistinguishable from one that passed.
         run: uv run pytest tests/dbt
         env:
           ENERGY_REQUIRE_POSTGRES: "1"
