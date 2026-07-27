@@ -31,6 +31,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from energy_platform.rows import as_float
 from tests.dbt.warehouse_guard import skip_or_fail
 
 pytestmark = pytest.mark.postgres
@@ -41,6 +42,11 @@ SCHEDULE_RELATION = "derived.dispatch_schedule"
 # EUR / kWh / ct-per-kWh. The dispatch schedule is settled to a millionth of a euro at its
 # persistence boundary while the SQL keeps full double precision, so the two agree to within one
 # rounding step. Anything larger is a real divergence, not a representation difference.
+#
+# Deliberately tighter than assert_optimal_never_costs_more_than_naive's 1e-5, and not an
+# inconsistency: this compares one rounded value against its unrounded twin, hour by hour, so one
+# step is the whole budget. That test compares a *difference* of two objectives, each of which is
+# three independently rounded terms.
 TOLERANCE = 1e-6
 
 # dispatch scenario -> the M5 scenario that must equal it.
@@ -137,8 +143,8 @@ def test_the_layers_agree_hour_by_hour(
 ) -> None:
     """A sign error, a unit slip, or a different counterfactual definition fails here by name."""
     for row in paired_rows:
-        dispatch = _float(row[dispatch_column])
-        warehouse = _float(row[sql_column])
+        dispatch = as_float(row[dispatch_column])
+        warehouse = as_float(row[sql_column])
         assert dispatch == pytest.approx(warehouse, abs=TOLERANCE, nan_ok=False), (
             f"{what} diverged at {row['ts_utc']} {row['region']} {row['tariff_id']} "
             f"{row['dispatch_scenario']}: dispatch {dispatch}, warehouse {warehouse}"
@@ -172,11 +178,3 @@ def test_unpriced_hours_carry_no_money_on_either_side(
         else:
             assert row["d_cost"] is None
             assert row["d_revenue"] is None
-
-
-def _float(value: object) -> float | None:
-    """Narrow a psycopg value to ``float | None`` -- numeric columns arrive as Decimal."""
-    if value is None:
-        return None
-    assert isinstance(value, int | float | str)
-    return float(value)

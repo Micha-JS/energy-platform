@@ -65,8 +65,12 @@ _slow = settings(deadline=None, max_examples=25, suppress_health_check=[HealthCh
 
 # Tolerances. Flows are exact float arithmetic, so kWh comparisons are tight. The money identities
 # hold exactly (settlement derives the totals from the rounded components), so they get float dust
-# only. Cross-scenario cost comparisons budget a couple of rounding steps: two independently
-# settled windows can each be a millionth of a euro off the unrounded value.
+# only. Cross-scenario cost comparisons budget the full rounding envelope: settlement rounds the
+# energy cost, the feed-in revenue and the terminal credit independently at a millionth of a euro,
+# so each scenario carries up to +-1.5e-6 and a comparison of two carries +-3e-6, plus snapped flows
+# and the terminal SoC quantum. Same derivation, same number as tolerance_eur in
+# assert_optimal_never_costs_more_than_naive -- the warehouse and the property tests assert the same
+# theorem and must not disagree about what a rounding step costs.
 _KWH = 1e-9
 _EXACT_EUR = 1e-12
 _EUR = 1e-5

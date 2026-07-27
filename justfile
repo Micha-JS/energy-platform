@@ -71,7 +71,13 @@ dbt-build:
 # scenarios to the `derived` schema. Needs mart_hourly_energy, so run after a dbt build.
 # Re-running replaces a window's rows rather than appending -- see dispatch/store.py for why the
 # raw zone's content-hash contract deliberately does not extend here.
+#
+# --from/--to solves an ad-hoc window and reports it WITHOUT writing: the derived tables hold the
+# declared windows and nothing else, which is what lets a solve for any other window be treated as
+# stale rather than tolerated. Add the window to coverage_windows in dbt/dbt_project.yml to persist
+# it, or --output PATH to keep a scratch copy.
 # Example: just dispatch --tariff dynamic_2024
+# Example: just dispatch --from 2024-03-29 --to 2024-03-31 --output /tmp/look.json
 dispatch *ARGS:
     uv run energy-platform dispatch {{ARGS}}
 
