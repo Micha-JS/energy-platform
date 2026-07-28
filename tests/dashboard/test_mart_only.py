@@ -168,7 +168,15 @@ def test_every_mart_the_dashboard_reads_is_a_real_model() -> None:
 
 
 def _warehouse_columns() -> dict[str, set[str]]:
-    """Mart name -> the columns the built warehouse actually has."""
+    """Mart name -> the columns the built warehouse actually has.
+
+    Two ways to have no warehouse, and both must skip rather than fail spuriously: no Postgres at
+    all, and -- the case the ``quality`` CI job is in -- a live Postgres whose marts schema has
+    never been built. Only the first is an obvious skip; the second looks exactly like a dashboard
+    that selects columns from nine relations that do not exist, which is the wrong accusation to
+    make. ``ENERGY_REQUIRE_DBT`` turns either skip into a failure in the job that *does* build the
+    warehouse, so the check still cannot silently not run where it matters.
+    """
     config = PostgresConfig.from_env()
     try:
         conn = psycopg.connect(config.dsn, connect_timeout=3)
@@ -183,6 +191,12 @@ def _warehouse_columns() -> dict[str, set[str]]:
         )
         for table, column in cur.fetchall():
             columns.setdefault(table, set()).add(column)
+
+    if not warehouse.MARTS & set(columns):
+        skip_or_fail(
+            f"no marts in {config.marts_schema}; the warehouse has not been built "
+            "(run `just warehouse`)"
+        )
     return columns
 
 
