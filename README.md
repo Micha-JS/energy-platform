@@ -9,7 +9,17 @@ German day-ahead market data + real PV/battery telemetry (Fenecon Home 10, 8.8 k
 ![Forward-looking dispatch: naive self-consumption vs forecast-driven dispatch vs the hindsight
 optimum, over 60 rolling days of the synthetic demo data](docs/img/regret_three_way.png)
 
-> **Status: M9 — dashboard.** A Streamlit app in `dashboard/`, wired into `docker compose`, with
+> **Status: M10 — plan publisher + thermal telemetry.** The platform emits for the first time:
+> `energy-platform publish-plan` puts the day's dispatch plan on MQTT as a **retained
+> recommendation** — never a command — that a Home Assistant instance can consume, and three new
+> telemetry channels (`load_base`, `ac_power`, `indoor_temperature`) start the data clock M11 needs.
+> `household_load = load_base + ac_power` is enforced as a testable identity rather than assumed,
+> and the air conditioner it adds is enough to move M8's headline and erase M7's load-model margin
+> over persistence — both written up honestly rather than smoothed. Details in
+> [Thermal telemetry and the plan publisher (M10)](#thermal-telemetry-and-the-plan-publisher-m10).
+> Previously:
+>
+> **M9 — dashboard.** A Streamlit app in `dashboard/`, wired into `docker compose`, with
 > four pages: the hourly energy balance and coverage, the tariff and solar economics, the three-way
 > dispatch comparison, and the forecast evaluation. Its organising constraint is the **mart-only
 > rule**: every number on screen is a column of a dbt mart, and the app computes nothing. That is
@@ -23,9 +33,9 @@ optimum, over 60 rolling days of the synthetic demo data](docs/img/regret_three_
 > each Berlin day's battery schedule is planned at that day's decision time from the forecasts
 > available then, and then *executed against what actually happened*. `mart_dispatch_regret` sets the
 > result beside the naive baseline and the hindsight optimum, and the honest answer on synthetic data
-> is that **forecast-driven dispatch captured −965% of the available savings** — it lost money. That
+> is that **forecast-driven dispatch captured −1311% of the available savings** — it lost money. That
 > is not a bug and it is the most interesting number in the repo: the prize is **€0.29** over sixty
-> days, and acting on forecasts good enough to score 0.18 kWh MAE costs **€2.86**. A day-ahead
+> days, and acting on forecasts good enough to score 0.19 kWh MAE costs **€3.88**. A day-ahead
 > planner given *perfect* forecasts captures only **6.7%**, so almost none of the shortfall is
 > forecasting's fault — the value simply is not reachable one day at a time. Details in
 > [Forward-looking dispatch (M8)](#forward-looking-dispatch-m8). Previously:
@@ -61,8 +71,13 @@ optimum, over 60 rolling days of the synthetic demo data](docs/img/regret_three_
   telemetry            │             │                   → marts     dispatch,
                        └─────────────┘                               forecasts)
                                                              │
-                                        optimizer + forecasts│──▶ Streamlit
-                                        (energy_platform pkg) ▼    dashboard
+                                        optimizer + forecasts│
+                                        (energy_platform pkg) │
+                                                             ├──▶ Streamlit dashboard
+                                                             │
+                                                             └──▶ MQTT ──▶ Home Assistant
+                                                                  (the day's plan,
+                                                                   as a recommendation)
 ```
 
 - **`src/energy_platform/`** — typed Python package: `tariffs/`, `dispatch/` (MILP battery
@@ -75,6 +90,9 @@ optimum, over 60 rolling days of the synthetic demo data](docs/img/regret_three_
 - **`dashboard/`** — the Streamlit presentation layer, outside the package on purpose: it reads
   marts through a read-only role and computes nothing, and the scientific and plotting stacks are
   fenced out of `src/` (see [Dashboard (M9)](#dashboard-m9)).
+- **`publishing/`** — the only outbound path: it reads a stored plan and publishes it to MQTT as a
+  retained recommendation. Disabled by default (see
+  [M10](#thermal-telemetry-and-the-plan-publisher-m10)).
 
 The same pipeline as the two tools actually render it — both taken from a stack booted with
 `just demo` and seeded with `just dbt-seed && just warehouse`:
@@ -169,9 +187,10 @@ Both weather connectors are unit-tested against offline fixtures
 
 ## Telemetry (M3)
 
-Household telemetry — PV production, load, battery charge/discharge, state of charge, and grid
-import/export — comes from two producers that land in the **identical** raw-zone schema, so
-nothing downstream knows or cares which ran:
+Household telemetry — PV production, load, battery charge/discharge, state of charge, grid
+import/export and, from M10, the thermal channels (`load_base`, `ac_power`, `indoor_temperature`)
+— comes from two producers that land in the **identical** raw-zone schema, so nothing downstream
+knows or cares which ran:
 
 - **Synthetic generator** (source `synthetic`) — what the public demo and CI run on.
   **Synthetic telemetry is a pure function of `(config, date)`** and the day's ingested
@@ -199,7 +218,11 @@ Design decisions worth calling out:
   will read — same physics on both sides of the savings comparison.
 - **Energy conservation is property-tested.** The AC-node balance closes every hour and SoC
   never leaves its bounds, checked with Hypothesis; missing irradiance yields null PV (NaN over
-  fabrication), never a fabricated value.
+  fabrication), never a fabricated value. From M10 a second identity rides alongside it —
+  `household_load = load_base + ac_power`, tight to one ULP rather than to a modelling budget, and
+  checked in the warehouse as well as in the generator. The air conditioner is a *component of* consumption, not
+  an extra term in the node balance, so the AC-node identity is untouched by the split. See
+  [Thermal telemetry (M10)](#thermal-telemetry-and-the-plan-publisher-m10).
 
 The connectors are unit-tested against offline fixtures / stubs — CI makes no live calls and
 never reaches a live house.
@@ -464,25 +487,39 @@ just forecast --target pv_production_kwh   # re-run one target
 
 ### What the seeded numbers say, and what they don't
 
-Mean absolute error over the spring window, 216 scored hours per model:
+Mean absolute error over the spring window, 216 scored hours per model (264 for `persistence`,
+which needs no warm-up and therefore scores a few earlier days too):
 
 | target | model | role | MAE (kWh) |
 | --- | --- | --- | --- |
-| load | `load_hgb` | model | **0.0302** |
-| load | `seasonal_naive` | baseline | 0.0314 |
-| load | `persistence` | baseline | 0.0338 |
+| load | `load_hgb` | model | **0.0491** |
+| load | `persistence` | baseline | 0.0493 |
+| load | `seasonal_naive` | baseline | 0.0499 |
 | pv | `toy_physical` | *oracle* | 0.1667 |
-| pv | `pvlib_hgb` | model | **0.1801** |
+| pv | `pvlib_hgb` | model | **0.1877** |
 | pv | `pvlib_physical` | model | 0.3108 |
 | pv | `seasonal_naive` | baseline | 0.4506 |
-| pv | `persistence` | baseline | 0.4788 |
+| pv | `persistence` | baseline | 0.4631 |
 
-**The load result is a ceiling, not a win.** M3 generates load as a fixed weekday × hour × month
-profile times `1 + U(−0.12, 0.12)`. That noise is i.i.d. by construction and therefore not
-learnable, so a perfect predictor of the shape still scores `E|U(−a,a)| = a/2` times the mean level
-— **0.0274 kWh** here, in closed form. `load_hgb` reaches 0.0302 against that floor. Matching
-seasonal-naive is the *correct* outcome: seasonal-naive on this data essentially is the generator.
-A model that beat it substantially would be reading something it should not.
+**The load result was a ceiling before M10, and is now a tie.** M3 generates base load as a fixed
+weekday × hour × month profile times `1 + U(−0.12, 0.12)`. That noise is i.i.d. by construction and
+therefore not learnable, so a perfect predictor of the shape still scores `E|U(−a,a)| = a/2` times
+the mean level — **0.0274 kWh**, in closed form. Against that floor `load_hgb` used to reach 0.0302,
+and matching seasonal-naive was the *correct* outcome: seasonal-naive on that data essentially is
+the generator, and a model beating it substantially would have been reading something it should not.
+
+**M10 added an air conditioner to the house, and the load model's margin vanished.** Every load
+figure above rose by roughly 0.02 kWh, and `load_hgb` now leads `persistence` by 0.0002 — which is
+not a lead. This is worth stating plainly rather than rounding away, because it is a real finding
+about the *models*, not a data artefact: the AC is a bang-bang thermostat driven by outdoor
+temperature and irradiance, so its draw is a step function whose *timing* depends on a thermal state
+none of these models has. They see calendar and weather features and are being asked to predict a
+latch. The error they add is concentrated in the few hours a day the compressor switches.
+
+The honest reading is that **M7's "beat the naive baselines" result was contingent on the load being
+a smooth profile plus noise**, and it did not survive a lumpy appliance being added to the house.
+That is the argument for M11 stated as a measurement: the fix is not a better load model but a
+*model of the thermostat* — which is exactly what treating the house as RC storage provides.
 
 **The PV ranking is dominated by geometry, not by skill.** The synthetic truth is
 `dc_kwp × GHI/1000 × PR × temp_derate` — irradiance on a *horizontal* surface, no panel tilt
@@ -492,7 +529,7 @@ tilted model collects **10% more** than the flat one. That is correct physics lo
 reasons that have nothing to do with forecasting.
 
 `pvlib_hgb` fits the **residual** against that chain, and the number to read is the gap it closes,
-not its rank: 0.3108 → 0.1801 is the boosting learning most of the transposition back off again. It
+not its rank: 0.3108 → 0.1877 is the boosting learning most of the transposition back off again. It
 does not reach the oracle and should not — the oracle *is* the generator, and the only way past it
 is to read the labels. A hybrid that beat 0.1667 on this data would be evidence of a leak, which is
 why the ranking is reported with the oracle in it rather than filtered down to a flattering top row.
@@ -597,17 +634,27 @@ Sixty rolling days, 2024-05-02 to 06-30 — the part of the spring window where 
 | | dynamic tariff | static tariff |
 | --- | --- | --- |
 | Available savings (naive → hindsight) | **€0.29** | **€0.00** |
-| Forecast-driven, vs naive | **−€2.84** (worse) | **−€2.86** (worse) |
-| — of which forecast error | €2.86 | €2.86 |
+| Forecast-driven, vs naive | **−€3.86** (worse) | **−€4.33** (worse) |
+| — of which forecast error | €3.88 | €4.33 |
 | — of which day-ahead myopia | €0.27 | €0.00 |
-| **Captured value share** | **−965%** | n/a (no prize) |
+| **Captured value share** | **−1311%** | n/a (no prize) |
 | Attainable share, perfect forecast | **6.7%** | n/a |
 
 **Captured-value share is the number to quote, and here it is deeply negative.** It normalises by the
 size of the prize, so it is comparable across windows of different length and sunniness in a way a
 euro figure is not — and it says plainly that on this system, dispatching on forecasts is worse than
 not dispatching on anything. The euro figures explain why: the prize is 29 cents over two months, and
-being wrong about the weather costs ten times that.
+being wrong about the weather costs more than ten times that.
+
+**These numbers moved at M10, and which ones moved is the interesting part.** Adding a
+thermostat-driven air conditioner to the simulated house ([Thermal telemetry](#thermal-telemetry-and-the-plan-publisher-m10))
+made forecast-driven dispatch *worse*: forecast error cost rose from €2.86 to €3.88 on the dynamic
+tariff. But the prize did not move at all (€0.29 before and after) and neither did the myopia
+component (€0.27). That is the decomposition earning its keep a second time. The arbitrage available
+to a 14 kWh battery is set by the spread it can move energy across, not by how much the house
+consumes, so a larger load leaves it unchanged; what a larger load does change is how much there is
+to be wrong about. **Adding an unmodelled flexible load degrades a forecast-driven controller and
+leaves the ceiling where it was** — which is, as it happens, precisely the argument for M11.
 
 **None of these euros annualise, and the share is the reason they do not have to.** Every figure in
 the table is a total over sixty specific spring days of synthetic data, and multiplying it by six
@@ -715,7 +762,7 @@ Design decisions worth calling out:
   target is a fixed profile plus i.i.d. noise, so `load_hgb` is already near the irreducible floor)
   but because the **prize** grows. Real load is spikier and less correlated with real PV than the
   generator's, so there is more genuine arbitrage for the optimizer to find, and a bigger denominator
-  is what turns −965% into a number worth acting on. If the share stays negative once real telemetry
+  is what turns −1311% into a number worth acting on. If the share stays negative once real telemetry
   accumulates, the honest conclusion is that this battery should be run on self-consumption and the
   optimizer left off — which is a result, and one this repo would print.
 
@@ -775,7 +822,7 @@ Design decisions worth calling out:
   no-battery views carry the `battery_unreturned_kwh` caveat about M3's midnight state-of-charge
   reset.
 - **Shares are never clamped.** `captured_value_share` is bounded above by 1 (a theorem) and
-  deliberately unbounded below. On the seeded data it is −965%, and the Dispatch page shows exactly
+  deliberately unbounded below. On the seeded data it is −1311%, and the Dispatch page shows exactly
   that, beside the attainable share that explains it. A UI that clipped the axis to the good half
   would suppress the most interesting result in the project.
 - **Streamlit is an optional extra, not a runtime dependency.** `uv sync --extra dashboard`; the
@@ -790,6 +837,201 @@ Design decisions worth calling out:
   around zero. Colours come from `energy_platform.palette`, the module `scripts/report_regret.py`
   draws the README figure from — so blue means *forecast-driven* in the figure and on the page by
   construction rather than by coincidence.
+
+## Thermal telemetry and the plan publisher (M10)
+
+Two things, both prerequisites for M11 (AC as a flexible load, the house as thermal storage), and
+one of them is the first time this platform **emits** rather than absorbs.
+
+### The plan publisher
+
+`energy-platform publish-plan` reads the forward plan M8 already computed for one Berlin day and
+publishes it to MQTT as a **retained JSON document** a Home Assistant instance can consume.
+
+```bash
+just demo-broker                                     # the stack, plus a Mosquitto on :1883
+just dbt-seed && just warehouse                      # ...and something to publish
+just publish-plan --date 2024-06-12 --dry-run        # see the payload; no broker, nothing sent
+ENERGY_MQTT_ENABLED=1 just publish-plan --date 2024-06-12 --tariff dynamic_2024
+docker compose exec mosquitto mosquitto_sub -t 'energy/#' -t 'homeassistant/#' -v
+```
+
+**It is a recommendation, and that is a field rather than a paragraph.** Every message carries
+`"kind": "recommendation"` and `"advisory": true`, because the distinction matters to whoever writes
+the automation on the other end and prose in a repository will not reach them. There is no command
+topic, no write path to an inverter, and no acknowledgement. A consumer that chooses to act on this
+is making that decision itself.
+
+| topic | retained | what |
+| --- | --- | --- |
+| `energy/{site}/plan/v1` | yes | the whole plan document |
+| `homeassistant/sensor/energy_platform_{site}_{key}/config` | yes | discovery, one per scalar head |
+
+```jsonc
+{
+  "schema_version": 1, "kind": "recommendation", "advisory": true,
+  "site_id": "home", "tariff_id": "dynamic_2024", "scenario": "forecast_driven",
+  "issued_at": "2024-06-11T22:00:00Z",     // the decision time the plan is defined at
+  "published_at": "2024-06-12T00:15:03Z",  // excluded from the idempotency digest
+  "plan_status": "fallback_naive",         // planned | fallback_naive
+  // expected_hours comes from the Berlin calendar (23 or 25 on a DST day), never from a row
+  // count; planned_hours is 23 here because one hour of this day could not be resolved.
+  "coverage": { "local_date": "2024-06-12", "expected_hours": 24, "planned_hours": 23, ... },
+  "hours": [ { "ts_utc": "2024-06-12T10:00:00Z",
+               "battery_charge_kwh": 0.0, "battery_discharge_kwh": 0.0,
+               "expected_grid_import_kwh": 0.0, "expected_grid_export_kwh": 4.31,
+               "expected_soc_kwh": 14.0,
+               "expected_pv_production_kwh": 4.726, "expected_household_load_kwh": 0.416,
+               "import_price_ct_kwh": 27.845 } ],
+  "provenance": { "input_digest": "...", "pv_model_key": "...", "load_model_key": "...",
+                  "decision_rule_id": "berlin_midnight_before_target_day", "solver": "HiGHS", ... }
+}
+```
+
+With discovery on (the default) Home Assistant registers the scalar entities itself and there is
+nothing to configure. To wire the document up by hand instead — or to read a field the heads do not
+expose — the topic is a plain JSON sensor:
+
+```yaml
+# configuration.yaml — equivalent to one of the auto-registered heads, done manually.
+mqtt:
+  sensor:
+    - name: "Battery plan, next hour"
+      state_topic: "energy/home/plan/v1"
+      unit_of_measurement: "kWh"
+      value_template: >-
+        {% set t = utcnow().strftime('%Y-%m-%dT%H:00:00Z') %}
+        {% set future = value_json.hours | selectattr('ts_utc', 'ge', t)
+                                         | selectattr('battery_charge_kwh', 'ne', None) | list %}
+        {% if future %}
+          {{ (future[0].battery_charge_kwh - future[0].battery_discharge_kwh) | round(3) }}
+        {% else %}unknown{% endif %}
+```
+
+Note the second `selectattr`: skipping the hours with a null instruction is what stops an
+unresolved hour being read as "hold". Templates that select on time alone will land on it.
+
+Design decisions worth calling out:
+
+- **Retention is load-bearing, not a tuning knob.** A retained topic holds exactly one message, so
+  Home Assistant re-reads the latest plan after a restart without this platform having to be awake,
+  and "never a duplicate stream" is *structural* rather than enforced — a republish overwrites. On
+  top of that a small `derived.plan_publications` ledger stores the payload digest, so an unchanged
+  plan is a reported no-op rather than identical bytes resent on every schedule tick. The digest
+  excludes `published_at`; without that exclusion nothing would ever match and the idempotency
+  claim would be false while looking implemented.
+- **Discovery registers scalars only, because a plan is a document.** Home Assistant's MQTT
+  discovery is built for sensors holding one value, and a 24-row schedule pushed through that
+  schema becomes a JSON blob truncated at HA's 255-character state limit. So the document stays a
+  document on one topic, and five discovery configs point their `state_topic` at *that same topic*
+  and extract a field with a `value_template` — one source of truth on the wire, five entities in
+  HA, no second publish path free to disagree with the first. The heads stop at what is
+  unambiguous: there is no "should I charge now" entity, which would be a control signal wearing a
+  sensor's clothes. The templates are rendered by Home Assistant and by nothing in this codebase,
+  so they are unit-tested against the payload shape here — a broken one would otherwise surface as
+  a row of `unknown` sensors in somebody's house, days later, with no error anywhere.
+- **The plan is read, never recomputed — which cost M8 five columns.** The day-ahead solve derives
+  a whole day (forecast PV and load, the grid exchange they imply, the SoC along the way) and used
+  to discard all but the battery pair. The publisher needs the expected grid exchange, and
+  recomputing it downstream would have created a second derivation of one plan, free to disagree
+  with the warehouse's about efficiency, clipping or rounding — and to disagree *silently*, since
+  nothing would have compared them. So `forward_dispatch_schedule` now records what the plan
+  expected beside what it instructed. Same move [M9's mart-only rule](#dashboard-m9) forced when
+  `attainable_savings_eur` turned out to be computed inside a ratio and never exposed.
+- **Zero is an instruction; absence is not.** Reading the plan back surfaced a real bug of exactly
+  the kind the payload contract opens by forbidding. On a fallback day the warehouse legitimately
+  stores a `0.0` battery hold for an hour the solve could not resolve — correct there, because the
+  executor did carry out that hold. Published verbatim it tells a house to do something specific on
+  an hour nobody planned, and counted it in `planned_hours`. The reader keys on the expectation
+  columns instead, which are null exactly when the hour was not resolved.
+- **Ambiguity is refused, not guessed.** A day is planned once per consumption tariff, so "the plan
+  for the 12th" is under-specified until a tariff is named. The publisher takes the configured one
+  and otherwise exits non-zero naming what to set. A default would publish a real, well-formed,
+  wrong plan — the worst combination available for something a house acts on.
+- **Disabled at every layer, and the schedule ships STOPPED — the only one that does.** Every other
+  schedule accrues data into this platform's own storage, where an unwanted run costs an API call.
+  This one transmits a recommendation to a household's automation system, so enabling it is a
+  deliberate act. Host and credentials come only from the environment (`ENERGY_MQTT_ENABLED`,
+  `ENERGY_MQTT_HOST`, `ENERGY_MQTT_USER`, `ENERGY_MQTT_PASSWORD`, `ENERGY_MQTT_TLS`), never
+  committed — the same posture as the real Fenecon connector's token.
+- **The test split follows the claims.** Everything about the decision — what goes on the wire, in
+  what order, retained or not, whether to send at all — runs in-process against a recording
+  publisher, in milliseconds. Retention is a behaviour of the *broker*, and a fake asserting its own
+  `retain=True` flag proves only that we set a boolean, so one integration test publishes to a real
+  Mosquitto, disconnects entirely, and reconnects as a fresh subscriber. It is gated on
+  `ENERGY_REQUIRE_MQTT` so CI fails rather than skips — the same rule the raw-zone tests follow for
+  Postgres.
+
+### Thermal telemetry
+
+Three new channels through the existing connector pattern: `load_base`, `ac_power` and
+`indoor_temperature`. The synthetic generator gains a single-zone RC model driven by M2's outdoor
+temperature and irradiance, with a bang-bang thermostat whose electrical draw is `ac_power` and
+whose state is `indoor_temperature`.
+
+```
+dT/dt = ( (T_out - T_in) / R  +  solar_gain × GHI  -  Q_cool ) / C
+```
+
+One zone, one unit, linear dynamics — deliberately. The generator's job is to be a **knowable
+oracle** (the lesson of [M7's PV ranking](#what-the-seeded-numbers-say-and-what-they-dont), where
+the toy model wins because it *is* the data-generating process), and every parameter added now is
+one M11 has to identify later. The thermostat is the dumbest controller that is still a thermostat:
+it cannot see prices, PV, or the next hour. That is the point — it is the "actual behaviour"
+baseline M11 will be measured against, exactly as M3's naive battery is M6's.
+
+Design decisions worth calling out:
+
+- **`household_load` stays the canonical total, and is *not* derived from its parts.** The
+  generator emits all three channels independently, so
+  `household_load = load_base + ac_power` is a **testable identity** rather than a definition. Had
+  the total been computed downstream as the sum, `assert_load_split_identity.sql` could not have
+  been written at all: it would be true by construction and assert nothing about the producer. The
+  second reason is the real house — the Fenecon meters consumption, not appliances, so a deployment
+  with no AC sub-meter reports the total alone and the components null. The test is scoped to hours
+  where all three are present precisely so that house stays a first-class citizen rather than a
+  failure.
+- **The identity's tolerance is a representation limit, not a modelling budget.** The components
+  are quantised at the emission boundary and the total is the quantised sum of the *already
+  quantised* parts, so the only slack left is that a 3-decimal-place sum is not always a binary
+  float sum — `0.272 + 2.0` is `2.2720000000000002`. That is one ULP, and `assert_load_split_identity`
+  allows `1e-9`. Rounding all three independently would instead let them disagree by a whole Wh,
+  five hundred thousand times wider, and a budget sized for that would comfortably hide a real
+  defect. (The Hypothesis property test found the ULP case; the first version asserted bit
+  equality and was wrong.)
+- **Outdoor temperature stopped being optional.** It used to be a second-order PV derate an hour
+  could do without; it is now the RC model's driving input, so an hour missing it is null across
+  *all* channels rather than silently un-derated. On the seeded data this costs no coverage —
+  Open-Meteo delivers irradiance and temperature together — but the rule changed and says so.
+- **The zone cannot reset at midnight the way the battery does, and assuming it could was a trap.**
+  M3 starts every day at `soc_min` for per-partition purity, and that is survivable because a day of
+  dispatch genuinely refills the battery. Nothing re-heats a house back to a boundary condition. The
+  thermostat only acts *above* setpoint, so below it the zone free-runs with a 48-hour time constant
+  — longer than the day being simulated — and a constant start would have stamped a one-day sawtooth
+  onto every cool day, in the series whose whole purpose is to be a trustworthy oracle for M11.
+  Each day instead starts at the controller's equilibrium for **that day's own weather**: still a
+  pure function of the partition date, but a fixed *point* rather than a fixed *value*. How fast the
+  remaining error decays is asserted, not assumed.
+- **Heating is a floor, never a load.** German houses heat with gas or district heat, so heating
+  bounds the zone temperature from below and contributes nothing to `ac_power` or to consumption.
+  Without it a cooling-only model reports ~12 °C indoors across the seeded March and October
+  windows, which would be a nonsense series to learn from. Heating as a *dispatchable* load is out
+  of scope for M11 too.
+- **Real-mode AC power needs its own meter, and where there is none the channel is absent.** Nothing
+  in a Fenecon reading can separate the AC from the rest of the house. A deployment must point
+  `ac_power` at a genuinely separate source — the HVAC integration's own power sensor, or a plug or
+  circuit meter — through `ENERGY_HA_ENTITY_MAP`. Where none is configured the channel is never
+  estimated, never derived by subtraction, and never assumed zero.
+- **Multi-zone is out of scope and is not free.** The raw-zone key is
+  `(source, dataset, region, resolution, partition_date)` with `region` being the site, so a second
+  zone needs a zone dimension in the ingestion grain and would fan out `stg_telemetry`'s grain. One
+  zone, one flat `indoor_temp_c` column, said out loud so nobody assumes it scales.
+
+**On the seeded windows the AC runs on four days out of 102**, totalling 16 kWh — late June is the
+only genuinely hot stretch in a March-to-June window, and a German house cools conservatively. That
+is a thin slice, and it is reported rather than tuned away: moving the setpoint until the number
+looked better would be fitting the simulator to the demo. It is also enough to move M8's headline
+and to collapse M7's load-model margin, both of which are written up where those numbers live.
 
 ## Engineering invariants
 
@@ -809,6 +1051,10 @@ Design decisions worth calling out:
   role that can see the marts schema and nothing else, an AST guard confining SQL to one module, and
   a per-column contract checked against the built warehouse in CI. If a figure is missing, the fix
   is a mart.
+- **The platform advises and never actuates** — the one component that reaches outward publishes a
+  *recommendation*, said in a field of every message rather than only in prose. There is no command
+  topic, no write path to an inverter, and no acknowledgement; the broker is disabled by default and
+  its schedule is the only one that ships stopped.
 - **Orderings are asserted only where they are theorems** — the hindsight optimum is provably never
   worse than any trajectory feasible for its own problem, and that is enforced in the property tests
   and in the warehouse. "Forecasting beats doing nothing clever" is an empirical result about a
@@ -843,6 +1089,9 @@ they differ by two orders of magnitude:
 | `just demo` on a fresh clone | **a few minutes** — one `docker build`, almost all of it installing locked dependencies, paid once |
 | `just dbt-seed` + `just warehouse` | **minutes** — offline ingestion, then a dbt build, sixteen model fits and sixty days of MILP |
 
+`just demo-broker` is `just demo` plus an MQTT broker, for the M10 publisher. Nothing is published
+by it: the publisher is disabled by default and its schedule ships stopped.
+
 The last row is why seeding is a separate step and not folded into `just demo`. It could be, and
 then the demo would take minutes and the sixty-second promise would quietly be false; a stack that
 boots in seconds into an honest empty state is the better trade. Both seeding commands are offline —
@@ -861,6 +1110,8 @@ recorded fixtures, no API keys.
 | `just dbt-build` | build dbt models + run all tests               |
 | `just forecast`  | backtest the forecast models (`OMP_NUM_THREADS=1`) |
 | `just forward-dispatch` | roll the M8 day-ahead simulation over every window |
+| `just publish-plan` | publish a day's plan to MQTT (`--dry-run` to see it without a broker) |
+| `just demo-broker` | boot the stack *with* a Mosquitto, for the publisher demo |
 | `just figure`    | regenerate the README's three-way comparison figure |
 | `just forecast-reset` | drop synthetic vintages so a changed generator can re-seed |
 | `just dbt-reconcile` | assert the Python tariff engine matches the SQL |
@@ -874,8 +1125,8 @@ Any backfill accepts `--offline` (or `ENERGY_OFFLINE=1`) to serve SMARD/Open-Met
 fixtures instead of the live APIs — deterministic and network-free, which is how CI and the demo
 seed the stack.
 
-CI runs the full quality gate (against a Postgres service container, so the raw-zone idempotency
-tests execute), a `dbt` job that rebuilds and tests the warehouse on offline-seeded data, solves the
+CI runs the full quality gate (against a Postgres service container *and* a Mosquitto broker, so the
+raw-zone idempotency tests and M10's retained-message test both execute rather than skip), a `dbt` job that rebuilds and tests the warehouse on offline-seeded data, solves the
 dispatch optimizer, backtests the forecast models, rolls the forward-looking simulation, builds the
 four read-back marts, asserts the committed README figure still matches the warehouse, and then runs
 the warehouse guards — the no-lookahead manifest check and the Python↔SQL tariff, dispatch and
@@ -886,7 +1137,10 @@ publishes to GitHub Pages on merge to main.
 
 The dashboard's empty-warehouse tests run in the *quality* job instead, on every push: they need no
 marts, which is the point of them, and a graceful-degradation test that only ever runs against data
-proves nothing.
+proves nothing. The broker is started with `docker run` rather than as a `services:` block, because
+Mosquitto 2.x needs a mounted config to accept non-local connections and GitHub's service containers
+cannot mount one; the same `ci/mosquitto.conf` backs the compose `broker` profile, so CI and the demo
+run one broker configuration.
 
 ## License
 

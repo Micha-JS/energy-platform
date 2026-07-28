@@ -371,10 +371,16 @@ def test_simulated_day_conserves_energy_on_rounded_values(
         assert imp >= 0 and exp >= 0
         assert min(imp, exp) == 0.0  # mutually exclusive after rounding
 
-        # The load split is EXACT, not approximate: the generator quantises the two components
-        # and publishes their quantised sum, so this is the one identity here that needs no
-        # tolerance budget. Asserting it loosely would hide precisely the drift it exists to catch.
-        assert load == base + ac
+        # The load split is tight to a *representation* limit, not to a modelling budget. The
+        # generator quantises both components and publishes the quantised sum, so the only error
+        # here is that a decimal 3-dp sum is not always a binary float sum -- 0.272 + 2.0 is
+        # 2.2720000000000002, which is why this is approx and not `==`. One ULP, ~1e-16.
+        #
+        # The distinction matters: had the three values been rounded independently they could
+        # disagree by a whole Wh (5e-4), seven orders of magnitude looser, and a tolerance sized
+        # for that would hide real drift. This bound is the one the warehouse's
+        # assert_load_split_identity uses, and it is 1e-9 there for the same reason.
+        assert load == pytest.approx(base + ac, abs=1e-9)
 
         # AC-node balance on the rounded values. The battery dispatches against the published
         # total, so only pv/import/export/charge/discharge round independently of it -- and the

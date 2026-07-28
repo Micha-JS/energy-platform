@@ -24,7 +24,7 @@ hour (they are what the property tests assert):
   ``pv + grid_import + battery_discharge == load + grid_export + battery_charge``.
 * **SoC continuity with round-trip losses:** stored energy changes by
   ``charge*sqrt(rte) - discharge/sqrt(rte)`` and never leaves ``[soc_min, soc_max]``.
-* **The load split (exact, M10):** ``household_load == load_base + ac_power``. The air
+* **The load split (M10):** ``household_load == load_base + ac_power``, to within one ULP. The air
   conditioner is a *component of* consumption, not an extra node term, so the AC-node identity
   above is untouched by the split. ``household_load`` stays the canonical total and is emitted
   independently rather than derived downstream -- a total computed as the sum of its parts could
@@ -413,12 +413,13 @@ def simulate_day(
     practice Open-Meteo delivers them together, so this costs no coverage; it is stated because a
     reader would otherwise assume the M3 rule still held.
 
-    **The load split is exact by construction.** ``load_base`` and ``ac_power`` are quantised
-    first and ``household_load`` is the quantised sum of the *already-quantised* components, so
-    ``household_load == load_base + ac_power`` holds to floating-point dust rather than to within
-    three independent roundings (which could disagree by a whole Wh -- 500,000x the tolerance the
-    warehouse's sibling energy-conservation test uses). The battery then dispatches against that
-    same published total, so the AC-node identity closes on the emitted numbers too.
+    **The load split is tight to a representation limit, not to a modelling budget.**
+    ``load_base`` and ``ac_power`` are quantised first and ``household_load`` is the quantised sum
+    of the *already-quantised* components. The residual is therefore one ULP -- a 3-dp decimal sum
+    is not always a binary float sum (``0.272 + 2.0`` is ``2.2720000000000002``) -- rather than the
+    whole Wh that three independent roundings could disagree by, which is 500,000x wider and would
+    be a tolerance real drift could hide inside. The battery then dispatches against that same
+    published total, so the AC-node identity closes on the emitted numbers too.
 
     **The zone starts every day at the cooling setpoint**, for the reason the battery starts every
     day at ``soc_min``: a day's telemetry must be reproducible from its own partition date alone.

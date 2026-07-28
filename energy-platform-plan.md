@@ -144,6 +144,23 @@ energy-platform/
   payload schema is documented well enough to configure HA sensors from it, indoor temperature and
   AC power flow from synthetic generation through staging into the marts, the real-connector
   extension is fixture-tested, and CI is green.
+- **Landed**, and three things cost more than the plan allowed for. **The publisher needed M8 to
+  stop discarding what it knew**: the day-ahead solve derives the forecast physics, the grid
+  exchange and the SoC, and kept only the battery pair, so a plan that had to tell a house what to
+  expect could only have recomputed it — a second derivation of one plan, free to disagree
+  silently. Five columns on `forward_dispatch_schedule` fixed that. **The zone could not reset the
+  way the battery does**: the thermostat acts only above setpoint, so below it the zone free-runs
+  with a 48 h time constant and a constant daily start would have stamped a one-day sawtooth onto
+  every cool day; it starts at the controller's equilibrium for that day's own weather instead.
+  **And zero is an instruction**: a fallback day stores a `0.0` hold for an hour the solve could
+  not resolve, which is correct in the warehouse and, published verbatim, tells a house to hold on
+  an hour nobody planned.
+- **The AC moved two earlier headlines, and both were restated rather than smoothed.** M8's
+  captured-value share went from −965% to −1311% while the prize and the myopia term did not move
+  at all — a bigger load gives a battery no more arbitrage, only more to be wrong about. M7's load
+  model now leads `persistence` by 0.0002 kWh, which is not a lead: its margin was contingent on
+  load being a smooth profile plus i.i.d. noise, and a bang-bang appliance whose timing depends on
+  a thermal state no feature captures erased it. That is M11's case, stated as a measurement.
 
 ### M11 — Thermal optimization *(placeholder)*
 - AC as a flexible load and the house as RC thermal storage: extend the dispatch optimizer to

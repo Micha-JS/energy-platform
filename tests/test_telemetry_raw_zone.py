@@ -186,6 +186,7 @@ def test_stored_telemetry_conserves_energy_each_hour(raw_repo: RawZoneRepository
         exp = row[Dataset.GRID_EXPORT]
         chg = row[Dataset.BATTERY_CHARGE]
         assert (pv + imp + dis) == pytest.approx(load + exp + chg, abs=0.005)
-        # The load split survives the round trip through Postgres exactly, not approximately --
-        # the components are quantised before the total is formed, so nothing here can drift.
-        assert load == row[Dataset.LOAD_BASE] + row[Dataset.AC_POWER]
+        # The load split survives the round trip through Postgres to within one ULP: the
+        # components are quantised before the total is formed, so the only slack is that a 3-dp
+        # decimal sum is not always a binary float sum. Nothing modelling-sized can hide in 1e-9.
+        assert load == pytest.approx(row[Dataset.LOAD_BASE] + row[Dataset.AC_POWER], abs=1e-9)
