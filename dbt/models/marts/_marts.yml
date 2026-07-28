@@ -418,10 +418,11 @@ models:
       window, site and consumption tariff -- wide rather than per-scenario, because regret and
       captured share are relations *between* scenarios.
 
-      Three costs, all objective_eur over the same simulated span, from the same starting state of
+      Four costs, all objective_eur over the same simulated span, from the same starting state of
       charge, settled at the same terminal rate: naive_continuous (the baseline a household gets
-      for free), forecast_driven (what the platform can really deliver) and hindsight (the ceiling
-      nobody reaches).
+      for free), forecast_driven (what the platform can really deliver), perfect_foresight_plan
+      (the same day-ahead controller handed the actuals, which is what separates forecast error
+      from myopia) and hindsight (the ceiling nobody reaches).
 
       THE SPAN IS NOT THE WINDOW. The forecast models need min_train_days of warm-up, so the
       simulation starts later than the window it belongs to; sim_start/sim_end/simulated_days
@@ -554,7 +555,7 @@ models:
               {min_value: 0, max_value: 1, config: {where: "is_simulated"}}
       - name: scenario_rows
         description: >
-          How many scenarios this comparison was assembled from -- three when simulated, one for a
+          How many scenarios this comparison was assembled from -- four when simulated, one for a
           not-simulated marker. A different value means a scenario failed to write.
         tests:
           - not_null
@@ -562,13 +563,15 @@ models:
 
   - name: mart_forward_dispatch_daily
     description: >
-      The rolling simulation day by day: three scenarios, one row each per simulated Berlin day,
+      The rolling simulation day by day: four scenarios, one row each per simulated Berlin day,
       with the cumulative cost curve the README figure plots. The running total lives here rather
       than in the plotting script so the figure cannot drift from the mart.
 
-      Only forecast_driven was decided day by day; the two reference scenarios are solved once over
-      the span and merely settled per day, so they carry plan_status = 'not_planned' and null SoC
-      and fit-day columns rather than a guess.
+      Only forecast_driven's day-by-day decision is recorded here. naive_continuous and optimal
+      were never decided per day at all -- both are solved once over the span and merely settled
+      per day -- and perfect_foresight_plan is rolled day by day but kept only as a decomposition
+      instrument, so all three carry plan_status = 'not_planned' and null SoC and fit-day columns
+      rather than a guess.
     tests:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns:

@@ -36,6 +36,7 @@ Nothing here touches Postgres or the network, and nothing fits a model.
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from datetime import date, timedelta
 
 import pytest
@@ -48,6 +49,7 @@ from energy_platform.dispatch.execution import PlannedHour, execute_plan
 from energy_platform.dispatch.model import HourInputs, Scenario
 from energy_platform.dispatch.pricing import window_prices
 from energy_platform.dispatch.windows import CoverageWindow
+from energy_platform.forecasting.serving import ServingPlan
 from tests.dispatch.conftest import (
     BARE_DYNAMIC,
     FEED_IN,
@@ -465,6 +467,86 @@ def test_a_day_without_a_forecast_falls_back_to_naive_and_says_so() -> None:
 
     for earlier, later in zip(solution.days, solution.days[1:], strict=False):
         assert later.soc_start_kwh == pytest.approx(earlier.soc_end_kwh, abs=_KWH)
+
+
+def test_both_runs_plan_exactly_the_same_days() -> None:
+    """The two runs may differ in *accuracy* and never in *coverage*.
+
+    ``mart_dispatch_regret`` defines ``myopia_cost_eur`` as nothing more than the gap between
+    forecast_driven and perfect_foresight_plan, so a day one of them planned and the other fell
+    back on is billed to the controller's decision horizon and reported as a property of the
+    design. There are two independent ways in, and they point in opposite directions:
+
+    * a **forecast** with one unresolved hour -- the real run has no usable plan and falls back,
+      while the oracle, whose forecast is the actuals, sees nothing wrong with the day;
+    * a day with one missing **meter reading** -- the oracle cannot be handed a forecast for it at
+      all, while the real run's forecast is perfectly complete and it plans away.
+
+    Both are settled once by ``_plannable_days``, which is why this reaches for it directly: the
+    day statuses below only witness the real run, and the invariant is about the pair.
+    """
+    days = berlin_days(4)
+    hours = list(simulated_hours(days))
+    # Built before the meter reading is blanked, so this plan is complete on every day -- which is
+    # exactly the asymmetry under test.
+    pv_plan = serving_plan("pv_production_kwh", hours, days)
+    load_plan = serving_plan("household_load_kwh", hours, days)
+
+    forecast_gap, actual_gap = days[1], days[2]
+    pv_plan = _with_forecast_gap(pv_plan, forecast_gap)
+    hours = [
+        replace(hour, pv_production_kwh=None)
+        if forward.local_date_of(hour.ts_utc) == actual_gap and hour.ts_utc.hour == 11
+        else hour
+        for hour in hours
+    ]
+
+    solution = forward.simulate(
+        CoverageWindow(days[0], days[-1]),
+        "home",
+        tuple(hours),
+        BARE_DYNAMIC,
+        FEED_IN,
+        LOSSLESS,
+        pv_plan=pv_plan,
+        load_plan=load_plan,
+    )
+    assert isinstance(solution, forward.ForwardSolution)
+
+    statuses = {day.local_date: day.plan_status for day in solution.days}
+    assert statuses[days[0]] == forward.PLAN_STATUS_PLANNED
+    assert statuses[forecast_gap] == forward.PLAN_STATUS_FALLBACK
+    assert statuses[actual_gap] == forward.PLAN_STATUS_FALLBACK
+    assert statuses[days[3]] == forward.PLAN_STATUS_PLANNED
+
+    # And the oracle was handed a forecast for those two days and no others, so it takes the same
+    # two fallbacks rather than planning across them.
+    by_date = forward._hours_by_date(tuple(hours))
+    planned = {day for day, status in statuses.items() if status == forward.PLAN_STATUS_PLANNED}
+    plannable = forward._plannable_days(days, by_date, pv_plan.by_day, load_plan.by_day)
+    assert plannable == planned
+    assert set(forward._perfect_days(plannable, by_date, pv_plan)) == planned
+    assert set(forward._perfect_days(plannable, by_date, load_plan)) == planned
+
+    # The chain still runs through both fallbacks unbroken.
+    for earlier, later in zip(solution.days, solution.days[1:], strict=False):
+        assert later.soc_start_kwh == pytest.approx(earlier.soc_end_kwh, abs=_KWH)
+
+
+def _with_forecast_gap(plan: ServingPlan, day: date) -> ServingPlan:
+    """The same plan with one hour of ``day`` unresolved -- M7's "a gap is a gap" case."""
+    return replace(
+        plan,
+        days=tuple(
+            replace(
+                forecast,
+                hours=(replace(forecast.hours[0], p50_kwh=None), *forecast.hours[1:]),
+            )
+            if forecast.target_day == day
+            else forecast
+            for forecast in plan.days
+        ),
+    )
 
 
 def test_a_window_with_no_served_day_is_reported_rather_than_omitted() -> None:

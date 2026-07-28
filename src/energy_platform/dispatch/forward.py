@@ -42,17 +42,24 @@ four scenarios: a per-day or per-scenario terminal credit would let them be paid
 the energy they end holding, and the regret figure would be partly an artefact of the adjustment
 rather than a measurement of dispatch.
 
-**Two ways a day inside the span can fail to be planned**, and neither breaks the chain: no model
-has been fitted yet (the simulation simply starts later), or the day's forecast is incomplete. The
-second falls back to naive self-consumption for that day -- which is what a real controller without
-a usable plan does, and which needs no forecast at all -- and records that it did. Dropping the day
-would put a hole in the SoC chain; idling the battery would be a worse controller than the fallback
-and would misattribute the loss to the forecast.
+**Three ways a day inside the span can fail to be planned**, and none breaks the chain: no model has
+been fitted yet (the simulation simply starts later), the day's forecast is incomplete, or the day's
+*actuals* are. The last two fall back to naive self-consumption for that day -- which is what a real
+controller without a usable plan does, and which needs no forecast at all -- and record that they
+did. Dropping the day would put a hole in the SoC chain; idling the battery would be a worse
+controller than the fallback and would misattribute the loss to the forecast.
+
+The third reason is about the *simulation* rather than the controller, and it is why plannability is
+decided once in :func:`_plannable_days` and handed to both runs. A day with a missing meter reading
+is one the perfect-foresight reference cannot be given a forecast for -- its forecast is the actuals
+-- so letting the real run plan it anyway would make the two runs differ in coverage, and the myopia
+figure is defined as nothing but the difference between them.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Final
@@ -66,7 +73,7 @@ from energy_platform.dispatch.decision import (
 )
 from energy_platform.dispatch.execution import ExecutedHour, Execution, PlannedHour, execute_plan
 from energy_platform.dispatch.model import DispatchResult, HourInputs, Scenario
-from energy_platform.dispatch.optimizer import solve_window
+from energy_platform.dispatch.optimizer import DispatchError, solve_window
 from energy_platform.dispatch.pricing import (
     WindowPrices,
     planning_continuation_eur_kwh,
@@ -215,6 +222,9 @@ def simulate(
     # every night, which is measured rather than asserted: it cost EUR 19.5 over the seeded window.
     continuation = planning_continuation_eur_kwh(prices, battery, planning_continuation_ct_kwh)
 
+    # Decided once and handed to both runs, so neither can plan a day the other fell back on.
+    plannable = _plannable_days(sim_days, by_date, pv_days, load_days)
+
     soc_start = baselines.initial_soc_kwh(battery)
     execution, outcomes = _roll(
         sim_days,
@@ -225,6 +235,7 @@ def simulate(
         soc_start=soc_start,
         pv_days=pv_days,
         load_days=load_days,
+        plannable=plannable,
         continuation_eur_kwh=continuation,
     )
     # The same controller, handed the actuals as its forecast. What it still loses against the
@@ -238,8 +249,9 @@ def simulate(
         feed_in,
         battery,
         soc_start=soc_start,
-        pv_days=_perfect_days(sim_days, by_date, pv_plan),
-        load_days=_perfect_days(sim_days, by_date, load_plan),
+        pv_days=_perfect_days(plannable, by_date, pv_plan),
+        load_days=_perfect_days(plannable, by_date, load_plan),
+        plannable=plannable,
         continuation_eur_kwh=continuation,
     )
 
@@ -290,6 +302,7 @@ def _roll(
     soc_start: float,
     pv_days: Mapping[date, DayForecast],
     load_days: Mapping[date, DayForecast],
+    plannable: AbstractSet[date],
     continuation_eur_kwh: float,
 ) -> tuple[Execution, list[DayOutcome]]:
     """Plan, execute and chain, one Berlin day at a time.
@@ -298,7 +311,14 @@ def _roll(
     *identical* code and differs only in the forecasts it is handed. A second loop written to be
     "the same but with actuals" would eventually stop being the same, and the difference between
     the two runs -- which is exactly what the myopia figure measures -- would silently become a
-    difference in controller as well.
+    difference in controller as well. ``plannable`` is passed in for the same reason: which days
+    are plannable is a property of the *simulation*, not of either run's forecasts, so it is
+    decided once by :func:`_plannable_days` rather than rediscovered here from whatever this run
+    happens to have been handed.
+
+    The full ``pv_days``/``load_days`` are still passed alongside it, and not filtered down to
+    ``plannable``, because a day that fell back because its forecast had a hole in it still has a
+    fitted model behind it -- ``forward_dispatch_days.pv_fit_day`` should say which one.
     """
     soc_kwh = soc_start
     executed_hours: list[ExecutedHour] = []
@@ -314,7 +334,14 @@ def _roll(
         day_prices = window_prices(spec, feed_in, day_hours)
         pv_day, load_day = pv_days.get(day), load_days.get(day)
         plan, status, clamped = _plan_for_day(
-            day_hours, day_prices, battery, soc_kwh, pv_day, load_day, continuation_eur_kwh
+            day_hours,
+            day_prices,
+            battery,
+            soc_kwh,
+            pv_day,
+            load_day,
+            continuation_eur_kwh,
+            plannable=day in plannable,
         )
         execution = execute_plan(plan, day_hours, day_prices, battery, soc_start_kwh=soc_kwh)
 
@@ -341,32 +368,63 @@ def _roll(
     )
 
 
-def _perfect_days(
+def _plannable_days(
     sim_days: Sequence[date],
+    by_date: Mapping[date, tuple[HourInputs, ...]],
+    pv_days: Mapping[date, DayForecast],
+    load_days: Mapping[date, DayForecast],
+) -> frozenset[date]:
+    """The days the controller is allowed to plan -- decided once, for **both** runs.
+
+    Three conditions, and the third is the one that is easy to miss. Both forecasts must be present
+    and complete, because a schedule is a joint decision over PV and load. *And* the day's actuals
+    must be complete, because the perfect-foresight reference's forecast **is** the actuals: a day
+    with a hole in them is one the oracle cannot be handed a forecast for at all.
+
+    Deciding this separately per run is the bug this function exists to make impossible. The two
+    runs would then differ in *coverage* and not only in accuracy -- one planning a day the other
+    fell back on -- and ``mart_dispatch_regret`` defines ``myopia_cost_eur`` as nothing more than
+    the difference between them, so a coverage gap would be billed to controller myopia. Both
+    directions were reachable: a forecast with one unresolved hour made the real run fall back
+    while the oracle planned, and a day with one missing meter reading did the reverse.
+    """
+    plannable: set[date] = set()
+    for day in sim_days:
+        pv_day, load_day = pv_days.get(day), load_days.get(day)
+        if pv_day is None or load_day is None:
+            continue
+        if not pv_day.is_complete or not load_day.is_complete:
+            continue
+        if not all(hour.has_physics for hour in by_date[day]):
+            continue
+        plannable.add(day)
+    return frozenset(plannable)
+
+
+def _perfect_days(
+    plannable: AbstractSet[date],
     by_date: Mapping[date, tuple[HourInputs, ...]],
     plan: ServingPlan,
 ) -> dict[date, DayForecast]:
     """The actuals dressed as forecasts, for the perfect-foresight reference.
 
-    Only for days the real plan could also serve. Handing the oracle *more* days than the forecast
-    got would let it start earlier or skip a fallback, and the two runs would then differ in
-    coverage as well as in accuracy -- which is precisely the confound this reference exists to
-    remove. A day whose actuals are incomplete is left out for the same reason and falls back
-    identically.
+    Exactly the days :func:`_plannable_days` admitted -- no more, so the oracle cannot start
+    earlier or skip a fallback the real run took, and no fewer, so it cannot fall back on a day the
+    real run planned. Both would confound the myopia figure with a coverage difference.
     """
     served = plan.by_day
     perfect: dict[date, DayForecast] = {}
-    for day in sim_days:
-        real = served.get(day)
-        if real is None:
-            continue
+    for day in sorted(plannable):
+        real = served[day]
         hours = by_date[day]
         values = [
             hour.pv_production_kwh if plan.target == TARGET_PV else hour.household_load_kwh
             for hour in hours
         ]
         if any(value is None for value in values):
-            continue
+            # Unreachable: `_plannable_days` admits only days whose actuals are complete. Raised
+            # rather than skipped, because skipping is what silently reopens the coverage gap.
+            raise DispatchError(f"{plan.target} actuals for {day} are incomplete but plannable")
         perfect[day] = DayForecast(
             target=real.target,
             target_day=day,
@@ -391,10 +449,18 @@ def _plan_for_day(
     pv_day: DayForecast | None,
     load_day: DayForecast | None,
     continuation_eur_kwh: float,
+    *,
+    plannable: bool,
 ) -> tuple[tuple[PlannedHour, ...], str, int]:
-    """The battery trajectory this day was decided on, and how it was arrived at."""
-    if pv_day is None or load_day is None or not pv_day.is_complete or not load_day.is_complete:
+    """The battery trajectory this day was decided on, and how it was arrived at.
+
+    ``plannable`` is the single source of truth and is not re-derived here from ``pv_day`` and
+    ``load_day``: see :func:`_plannable_days` for why a second opinion about it is the confound
+    this milestone's headline figure is most vulnerable to.
+    """
+    if not plannable:
         return _naive_fallback(day_hours, day_prices, battery, soc_kwh), PLAN_STATUS_FALLBACK, 0
+    assert pv_day is not None and load_day is not None  # guaranteed by _plannable_days
 
     forecast_hours = _forecast_inputs(day_hours, pv_day, load_day)
     # `day_prices` is reused rather than re-derived from `forecast_hours`, and the two are the same

@@ -1674,7 +1674,7 @@
       "tariff_id": "dynamic_2024"
     },
     {
-      "cumulative_net_cost_eur": -143.99684200000002,
+      "cumulative_net_cost_eur": -143.99684300000004,
       "local_date": "2024-06-30",
       "scenario": "perfect_foresight_plan",
       "sim_day": 60,
@@ -3354,7 +3354,7 @@
       "tariff_id": "static_2024"
     },
     {
-      "cumulative_net_cost_eur": -143.82900800000002,
+      "cumulative_net_cost_eur": -143.82900900000004,
       "local_date": "2024-06-30",
       "scenario": "perfect_foresight_plan",
       "sim_day": 60,

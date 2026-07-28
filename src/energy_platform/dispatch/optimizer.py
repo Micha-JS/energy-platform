@@ -281,7 +281,7 @@ def solve_window(
     What the caller keeps responsibility for is comparability. Two scenarios may only be ranked
     against each other if they were solved from the same ``soc_start_kwh`` and settled at the same
     terminal rate, which is why :func:`energy_platform.dispatch.runner.solve` derives both once for
-    all its scenarios and why M8's simulation settles its three over one span rather than per day.
+    all its scenarios and why M8's simulation settles its four over one span rather than per day.
     """
     solution = solve_raw(hours, prices, battery, terminal_eur_kwh, soc_start_kwh=soc_start_kwh)
     if solution.status != "Optimal":

@@ -1,4 +1,4 @@
--- The rolling simulation day by day: three scenarios, one row each per simulated Berlin day.
+-- The rolling simulation day by day: four scenarios, one row each per simulated Berlin day.
 -- Grain: (window_start, window_end, region, tariff_id, scenario, local_date).
 --
 -- mart_dispatch_regret answers "how much did forecasting capture over the whole span". This answers
@@ -10,10 +10,12 @@
 -- WHY THE REFERENCE SCENARIOS HAVE DAILY ROWS AT ALL. Neither naive_continuous nor optimal was
 -- *decided* day by day -- both are solved once over the whole span -- but both are settled hour by
 -- hour, so their daily costs are a well-defined slice of that settlement rather than a re-solve.
--- What is not well defined for them is the plan, and the columns say so instead of guessing:
--- plan_status is 'not_planned' and the SoC and fit-day columns are null. Only forecast_driven has a
--- decision time, a plan it may have departed from, and a state of charge chained from the previous
--- day's *executed* trajectory.
+-- perfect_foresight_plan is the odd one: it IS rolled day by day, but it exists to decompose the
+-- headline rather than to be shipped, so only its settlement is persisted.
+-- What is not well defined -- or, for the oracle, not kept -- is the plan, and the columns say so
+-- instead of guessing: plan_status is 'not_planned' and the SoC and fit-day columns are null. Only
+-- forecast_driven has a decision time, a plan it may have departed from, and a state of charge
+-- chained from the previous day's *executed* trajectory.
 --
 -- CUMULATIVE COST IS A WINDOW FUNCTION OVER PRICED DAYS ONLY. A day the tariff could not price
 -- contributes null, not zero, and is skipped by the running sum rather than flattening it -- the
@@ -63,7 +65,7 @@ select
 
     decision_time,
     plan_status,
-    -- How far into the simulation this day is. Makes the three scenarios line up on one x-axis
+    -- How far into the simulation this day is. Makes the four scenarios line up on one x-axis
     -- without the reader having to do date arithmetic, and is DST-proof in a way an hour offset
     -- would not be.
     (local_date - sim_start) + 1                  as sim_day,

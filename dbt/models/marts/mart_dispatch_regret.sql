@@ -4,7 +4,7 @@
 -- not per scenario, because regret and captured share are relations *between* scenarios and a
 -- column that only makes sense across rows belongs in a wide model.
 --
--- Three costs, all `objective_eur` over the SAME simulated span, from the SAME starting state of
+-- Four costs, all `objective_eur` over the SAME simulated span, from the SAME starting state of
 -- charge, settled at the SAME terminal rate -- see energy_platform.dispatch.forward. A difference
 -- between them is a difference in dispatch and nothing else:
 --
@@ -120,7 +120,7 @@ compared as (
         max(selection_rule_id)                       as selection_rule_id,
         max(training_data_source)                    as training_data_source,
 
-        -- The three costs, pivoted. FILTER rather than a self-join: the grain is already one row
+        -- The four costs, pivoted. FILTER rather than a self-join: the grain is already one row
         -- per scenario, and a join could not fan out but could silently drop a scenario whose
         -- simulation failed -- which is the case this mart most needs to make visible.
         max(objective_eur) filter (where scenario = 'naive_continuous')  as naive_cost_eur,
