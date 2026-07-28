@@ -39,25 +39,27 @@ from typing import Any
 import psycopg
 
 from energy_platform.config import AppConfig
+from energy_platform.palette import (
+    BASELINE,
+    GRIDLINE,
+    INK_MUTED,
+    INK_PRIMARY,
+    INK_SECONDARY,
+    SCENARIO_COLOURS,
+    SCENARIO_LABELS,
+    SURFACE,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE_PATH = ROOT / "docs" / "img" / "regret_three_way.png"
 DATA_PATH = ROOT / "docs" / "img" / "regret_three_way.json"
 
-# Validated categorical slots 1-3 from the data-viz palette, in fixed order: the deliverable first,
-# then the two references. Assigned to the entity and never to its rank, so adding a scenario cannot
-# repaint these. Aqua sits below 3:1 on a light surface, which is why every bar is directly labelled
-# -- the relief rule, not decoration.
-COLOUR_FORECAST_DRIVEN = "#2a78d6"  # blue
-COLOUR_PERFECT_PLAN = "#eb6834"  # orange
-COLOUR_HINDSIGHT = "#1baf7a"  # aqua
-
-SURFACE = "#fcfcfb"
-INK_PRIMARY = "#0b0b0b"
-INK_SECONDARY = "#52514e"
-INK_MUTED = "#898781"
-GRIDLINE = "#e1e0d9"
-BASELINE = "#c3c2b7"
+# The palette moved to energy_platform.palette at M9, when the dashboard's Dispatch page started
+# drawing the same three scenarios this figure does. Two copies of the hex strings is the
+# arrangement where the figure and the page drift apart and blue stops meaning the same thing in
+# both -- so the colours are named once and imported twice. Colour is bound to the entity and
+# never to its rank, and aqua sits below 3:1 on this surface, which is why every bar below is
+# directly labelled. Both rules are restated where they live.
 
 # WHAT THE CHECK MAY LET THROUGH, AND WHY IT IS NOT ONE NUMBER.
 #
@@ -88,10 +90,13 @@ _TIE_BREAK_TOLERANCE_EUR = 0.50
 # absolute amount and take the identical tolerance -- which the CI run confirmed to six decimals.
 _FIT_DERIVED_EUR = frozenset({"forecast_driven_cost_eur", "regret_eur", "forecast_error_cost_eur"})
 
-_SERIES = (
-    ("forecast_driven", "Forecast-driven (executed)", COLOUR_FORECAST_DRIVEN),
-    ("perfect_foresight_plan", "Same planner, perfect forecast", COLOUR_PERFECT_PLAN),
-    ("optimal", "Hindsight-optimal", COLOUR_HINDSIGHT),
+# Naive is the baseline drawn as the zero line here, so it is not a series -- see the module
+# docstring on why this chart plots differences and not costs. Labels and colours come from the
+# palette rather than being spelled again, so the figure's legend and the dashboard's say the same
+# words about the same scenario.
+_SERIES = tuple(
+    (key, SCENARIO_LABELS[key], SCENARIO_COLOURS[key])
+    for key in ("forecast_driven", "perfect_foresight_plan", "optimal")
 )
 
 

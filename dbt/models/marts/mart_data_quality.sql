@@ -54,6 +54,10 @@ select
     ing.dataset,
     ing.region,
     ing.resolution,
+    -- The active data mode, for M9's dashboard banner. Non-null exactly on telemetry rows; the
+    -- market and weather connectors are neither synthetic nor real household data. Derived here
+    -- rather than inferred downstream because the dashboard may not compute -- see the macro.
+    {{ telemetry_data_mode('ing.source') }} as data_mode,
     ing.expected_hours,
     coalesce(obs.present_hours, 0)                    as present_hours,
     ing.expected_hours - coalesce(obs.present_hours, 0) as gap_hours,

@@ -24,11 +24,12 @@ fmt:
 
 # Strict type checking.
 typecheck:
-    uv run mypy src tests
+    uv run --extra dashboard mypy src tests dashboard
 
-# Run the test suite.
+# Run the test suite. The dashboard extra is installed because tests/dashboard renders every page
+# with Streamlit's AppTest -- including against an empty warehouse, which needs no data at all.
 test:
-    uv run pytest
+    uv run --extra dashboard pytest
 
 # Full local gate — mirrors CI.
 check: lint typecheck test
@@ -151,10 +152,46 @@ dbt-reconcile:
 dbt-docs:
     uv run --project dbt dbt docs generate --project-dir dbt --profiles-dir dbt
 
-# Boot the empty Dagster + Postgres stack -> http://localhost:3000
+# Boot the stack (Dagster + Postgres + dashboard) and print where to find it.
+#
+# Detached, unlike before M9: `up` in the foreground never returns, so it could not print the URLs
+# it had just made available. `just demo-logs` is the old behaviour when you want it.
+#
+# WHAT THIS DOES AND DOES NOT PROMISE. Sixty seconds gets you a running stack with a browsable
+# dashboard. It does NOT get you data: seeding the raw zone and building the warehouse is
+# `just dbt-seed` then `just warehouse`, which fits forecast models and solves sixty days of MILP
+# and takes minutes, not seconds. The dashboard opens in a designed "no data yet" state that names
+# both commands, because the alternative -- a stack that boots fast and a first page that is a
+# stack trace -- is worse than an honest wait.
 demo:
-    docker compose up --build
+    docker compose up --build -d
+    @just dashboard-grants
+    @echo ""
+    @echo "  Dagster    http://localhost:3000"
+    @echo "  Dashboard  http://localhost:8501"
+    @echo ""
+    @echo "  The warehouse is empty. To fill it:"
+    @echo "    just dbt-seed     # offline demo data into the raw zone"
+    @echo "    just warehouse    # build every mart"
+    @echo ""
+
+# Follow the stack's logs (what `just demo` used to do before it went detached).
+demo-logs:
+    docker compose logs -f
 
 # Tear the stack down and drop the Postgres volume.
 demo-down:
     docker compose down -v
+
+# Run the dashboard against a local Postgres, without the container -- the edit-reload dev loop.
+# Needs `just dashboard-grants` once, and the dashboard extra: `uv sync --extra dashboard`.
+dashboard *ARGS:
+    uv run --extra dashboard streamlit run dashboard/app.py {{ARGS}}
+
+# Create the dashboard's read-only role and grant it SELECT on the marts schema -- and nothing
+# else. Idempotent, and safe before or after a dbt build (it grants existing tables AND sets
+# default privileges for future ones). Compose runs the same file on a fresh volume; this recipe
+# is for a database that already existed, or after a rebuild added a mart.
+dashboard-grants:
+    docker compose exec -T postgres psql -U dagster -d dagster -q -v ON_ERROR_STOP=1 \
+        -f - < dashboard/sql/grant_read_only.sql

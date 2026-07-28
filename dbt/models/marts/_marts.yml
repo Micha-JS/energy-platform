@@ -313,6 +313,10 @@ models:
     description: >
       Per-source coverage gaps, nulls, and freshness. One row per (source, dataset, region,
       resolution). A view, so freshness_lag is live.
+
+      Coverage here is over all time at once, which is the right shape for a freshness panel and
+      the wrong one for "month by month" -- mart_coverage_monthly is the latter, and the two share
+      the declared_coverage_hours macro so they cannot disagree about what was claimed.
     tests:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns: [source, dataset, region, resolution]
@@ -321,12 +325,91 @@ models:
         tests: [not_null]
       - name: dataset
         tests: [not_null]
+      - name: data_mode
+        description: >
+          Whether this warehouse was built from the synthetic demo generator or from a real
+          house: 'demo_synthetic' | 'real', and NULL on the market and weather sources, which are
+          neither. THE DASHBOARD BANNER READS THIS. The classification is made here in SQL rather
+          than in the presentation layer because a figure on screen must be a mart column -- see
+          the telemetry_data_mode macro, and assert_telemetry_rows_declare_a_data_mode for the
+          guard that a new telemetry connector cannot land without a branch in it.
+        tests:
+          - accepted_values:
+              values: ["demo_synthetic", "real"]
+              config: {where: "data_mode is not null"}
       - name: present_hours
         tests:
           - dbt_utils.accepted_range: {min_value: 0}
       - name: expected_hours
         tests:
           - dbt_utils.accepted_range: {min_value: 0}
+
+  - name: mart_coverage_monthly
+    description: >
+      Per-source coverage at Europe/Berlin monthly grain. One row per (local_month, source,
+      dataset, region), hourly resolution only.
+
+      THREE COUNTS, THREE QUESTIONS, and carrying all of them is the point. expected_hours is how
+      long the month is (from berlin_month_hours, so 743 in March and 745 in October);
+      covered_hours is how much of it the declared coverage_windows ever claimed (from
+      declared_coverage_hours, the macro the two monthly economics marts already share);
+      present_hours is how much actually arrived. covered_hours = 0 with present_hours = 0 means
+      the pipeline never ran there. covered_hours = 168 with present_hours = 0 means it said it
+      did and nothing landed. A single ratio would make those two indistinguishable.
+
+      completeness_ratio is against expected_hours rather than covered_hours, matching
+      mart_tariff_counterfactuals and mart_solar_economics exactly: the denominator a monthly
+      figure must be read against is the calendar month, because that is what a monthly total
+      looks like it means.
+
+      Rows are the declared months UNION the observed months, crossed with every ingested series,
+      so a month in which a known series produced nothing is a row saying zero rather than an
+      absence -- and observations outside every declared window surface as covered_hours = 0
+      instead of being filtered away.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [local_month, source, dataset, region]
+    columns:
+      - name: local_month
+        description: First day of the Europe/Berlin calendar month.
+        tests: [not_null]
+      - name: source
+        tests: [not_null]
+      - name: dataset
+        tests: [not_null]
+      - name: region
+        tests: [not_null]
+      - name: data_mode
+        description: As on mart_data_quality; NULL on non-telemetry sources.
+        tests:
+          - accepted_values:
+              values: ["demo_synthetic", "real"]
+              config: {where: "data_mode is not null"}
+      - name: expected_hours
+        description: DST-correct length of the Berlin calendar month, from the calendar not the rows.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 672, max_value: 745}
+      - name: covered_hours
+        description: Hours of the month inside the declared coverage_windows. 0 = never claimed.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0}
+      - name: present_hours
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0}
+      - name: gap_hours
+        description: expected_hours - present_hours.
+        tests: [not_null]
+      - name: completeness_ratio
+        description: present_hours / expected_hours, in [0, 1].
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 1}
+      - name: is_partial_month
+        description: The flag a consumer must not have to derive. True for every seeded demo month.
+        tests: [not_null]
 
   - name: mart_forecast_eval
     description: >
@@ -515,6 +598,13 @@ models:
         description: The prize -- what perfect foresight was worth over naive dispatch.
       - name: realised_savings_eur
         description: What forecast-driven dispatch actually delivered over naive. May be negative.
+      - name: attainable_savings_eur
+        description: >
+          naive_cost_eur - perfect_foresight_cost_eur: what the same day-ahead controller would
+          have delivered over naive given perfect forecasts. The numerator of
+          attainable_value_share, exposed as its own column so a consumer can set realised,
+          attainable and available savings side by side without reconstructing one of them from a
+          share and a total.
       - name: captured_value_share
         description: >
           realised_savings_eur / available_savings_eur. Null where the prize was zero -- a window

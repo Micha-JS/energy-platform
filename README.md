@@ -9,7 +9,17 @@ German day-ahead market data + real PV/battery telemetry (Fenecon Home 10, 8.8 k
 ![Forward-looking dispatch: naive self-consumption vs forecast-driven dispatch vs the hindsight
 optimum, over 60 rolling days of the synthetic demo data](docs/img/regret_three_way.png)
 
-> **Status: M8 — forward-looking dispatch.** The milestone where the forecasts meet the optimizer:
+> **Status: M9 — dashboard.** A Streamlit app in `dashboard/`, wired into `docker compose`, with
+> four pages: the hourly energy balance and coverage, the tariff and solar economics, the three-way
+> dispatch comparison, and the forecast evaluation. Its organising constraint is the **mart-only
+> rule**: every number on screen is a column of a dbt mart, and the app computes nothing. That is
+> enforced three ways rather than asserted — the dashboard connects as a `dashboard_ro` role that
+> can read the marts schema and nothing else, an AST guard keeps SQL out of every module but the
+> query layer, and each query declares its columns as data so CI can check them against the
+> warehouse. Two marts were added *because* of the rule, not around it. Details in
+> [Dashboard (M9)](#dashboard-m9). Previously:
+>
+> **M8 — forward-looking dispatch.** The milestone where the forecasts meet the optimizer:
 > each Berlin day's battery schedule is planned at that day's decision time from the forecasts
 > available then, and then *executed against what actually happened*. `mart_dispatch_regret` sets the
 > result beside the naive baseline and the hindsight optimum, and the honest answer on synthetic data
@@ -39,7 +49,7 @@ optimum, over 60 rolling days of the synthetic demo data](docs/img/regret_three_
 > energy conservation, SoC bounds, and both exclusivities on every solution, and prove the optimum
 > never costs more than a baseline that is feasible for its own problem. CI rebuilds the warehouse,
 > solves, and rebuilds on offline-seeded data, and publishes the
-> [dbt docs site](https://micha-js.github.io/energy-platform/). The dashboard lands in M9.
+> [dbt docs site](https://micha-js.github.io/energy-platform/).
 
 ## Architecture
 
@@ -62,6 +72,9 @@ optimum, over 60 rolling days of the synthetic demo data](docs/img/regret_three_
 - **Orchestration** — Dagster assets, partitions, and schedules in
   `energy_platform.orchestration`, backed by Postgres for run and event storage.
 - **Warehouse & transforms** — append-only raw zone; dbt staging → intermediate → marts.
+- **`dashboard/`** — the Streamlit presentation layer, outside the package on purpose: it reads
+  marts through a read-only role and computes nothing, and the scientific and plotting stacks are
+  fenced out of `src/` (see [Dashboard (M9)](#dashboard-m9)).
 
 ## Market data (M1)
 
@@ -184,8 +197,9 @@ The [`dbt/`](dbt/) project (dbt-postgres) transforms the raw zone into an analyt
 - **Intermediate** — `int_hourly_spine` (a UTC-hour grid) joined to household energy balance and
   price in `int_hourly_energy`; an hour missing in any source stays **null**, never filled.
 - **Marts** — `mart_hourly_energy` (energy balance + price for every hour, the foundation M5's
-  economics and M6's optimizer both build on) and `mart_data_quality` (per-source gaps, nulls, and
-  live freshness).
+  economics and M6's optimizer both build on), `mart_data_quality` (per-source gaps, nulls, and
+  live freshness) and, from M9, `mart_coverage_monthly` (the same coverage question at monthly
+  grain, added because the dashboard may not aggregate one itself).
 
 ```bash
 just dbt-deps     # install dbt_utils
@@ -576,6 +590,13 @@ euro figure is not — and it says plainly that on this system, dispatching on f
 not dispatching on anything. The euro figures explain why: the prize is 29 cents over two months, and
 being wrong about the weather costs ten times that.
 
+**None of these euros annualise, and the share is the reason they do not have to.** Every figure in
+the table is a total over sixty specific spring days of synthetic data, and multiplying it by six
+would carry all of [the objections raised against annualising M6](#the-headline-honestly) plus a new
+one: forecast error is seasonal, so a spring window says little about December. That is precisely
+why `mart_dispatch_regret`'s documentation instructs readers to quote `captured_value_share` and not
+a euro total, and why the dashboard shows the euro prize only next to the span it was measured over.
+
 Design decisions worth calling out:
 
 - **The result is reported, never asserted — and that is a deliberate hole in the test suite.**
@@ -679,6 +700,78 @@ Design decisions worth calling out:
   accumulates, the honest conclusion is that this battery should be run on self-consumption and the
   optimizer left off — which is a result, and one this repo would print.
 
+## Dashboard (M9)
+
+A Streamlit app in `dashboard/`, served by `docker compose` on
+[localhost:8501](http://localhost:8501) and runnable on the host with `just dashboard`. Four pages,
+each reading only the marts it names:
+
+| Page | Reads | Shows |
+| --- | --- | --- |
+| **Overview** | `mart_hourly_energy`, `mart_coverage_monthly`, `mart_data_quality` | Hourly PV, load, import, export and state of charge over a covered span; coverage per month with partial months flagged; per-source gaps and freshness |
+| **Economics** | `mart_tariff_counterfactuals`, `mart_solar_economics` | {static, dynamic} × {battery, no battery} net cost per month; self-consumption and autarky; avoided grid cost against feed-in revenue |
+| **Dispatch** | `mart_dispatch_regret`, `mart_forward_dispatch_daily`, `mart_dispatch_comparison` | Captured-value share beside the attainable share, the regret split, the cumulative cost curve, and M6's four-scenario table ranked by `adjusted_net_cost_eur` |
+| **Forecasts** | `mart_forecast_eval` | MAE, bias, RMSE and pinball per model per horizon, split by `role` so the oracle is labelled rather than ranked |
+
+A persistent banner on every page states the active data mode — *demo: synthetic data* or *real* —
+read from `mart_data_quality.data_mode`, not from a config flag or a hardcoded string.
+
+Design decisions worth calling out:
+
+- **The mart-only rule: presentation computes nothing.** Every number on screen is a column of a
+  dbt mart. The app pivots, sorts and formats; it does not re-derive a cost, a rate, a coverage
+  figure or a metric. If a figure is not in a mart, the fix is a mart — and that is not a slogan
+  here, it is what happened twice. `mart_coverage_monthly` exists because `mart_data_quality` has
+  no monthly grain and the Overview page needed one. `mart_dispatch_regret.attainable_savings_eur`
+  exists because the Dispatch page wanted `naive − perfect_foresight`, which the mart had been
+  computing *inside* a ratio and never exposing. Both were one-line temptations to add a `groupby`
+  or a subtraction in Python, and both would have put a number on screen that no test in this repo
+  could check.
+- **The rule is enforced three ways, because no one of them is sufficient.** *The database
+  refuses*: the app connects as `dashboard_ro`, which holds `SELECT` on `analytics_marts` and
+  nothing else, with `default_transaction_read_only` on — `raw`, `derived`, staging and
+  intermediate are not merely unread, they are unreadable. *A static guard*: `test_mart_only.py`
+  walks the AST of every module under `dashboard/` and fails if any module but the query layer
+  imports a driver or holds a SQL string. *A contract guard*: every query is declared as data — a
+  mart name and its columns — so CI can check each column against the built warehouse, which is
+  what turns "change the mart" into a build failure. The static guards cannot see a query composed
+  at runtime; the role can. The role cannot tell a mart column from a Python expression; the
+  guards can. Each carries a positive control, so a guard cannot pass by the thing it guards
+  having been deleted.
+- **This completes an argument the repo has been making since M4.** Ingestion is bit-reproducible
+  and content-hashed. Transformations live in tested SQL. Optimization is value-stable. And now
+  presentation computes nothing. Every layer's claim is checkable in exactly one place, which is
+  the property that makes any of them worth stating.
+- **The empty warehouse is the happy path, not an edge case.** A stranger clones the repo, runs
+  `just demo`, and opens the dashboard before anything is seeded — that is the first thing that
+  happens to this app, every time. So every page renders a designed "no data yet" state naming the
+  two commands that fix it, and `tests/dashboard/test_empty_warehouse.py` asserts all four reach it
+  with no traceback. It runs in the fast CI job on every push, where the seeded tests can only
+  skip. The state is reached by *probing* `information_schema` rather than by catching
+  `UndefinedTable`: swallowing that exception would render a mart name the app got **wrong** as a
+  friendly onboarding message, hiding a bug behind reassurance.
+- **Coverage travels with every euro figure.** The demo covers three short windows, so a monthly
+  total read as a monthly bill is wrong by a large factor. Each page puts `completeness_ratio` and
+  `is_partial_month` / `is_partial_window` next to the figures they qualify, and the battery-versus-
+  no-battery views carry the `battery_unreturned_kwh` caveat about M3's midnight state-of-charge
+  reset.
+- **Shares are never clamped.** `captured_value_share` is bounded above by 1 (a theorem) and
+  deliberately unbounded below. On the seeded data it is −965%, and the Dispatch page shows exactly
+  that, beside the attainable share that explains it. A UI that clipped the axis to the good half
+  would suppress the most interesting result in the project.
+- **Streamlit is an optional extra, not a runtime dependency.** `uv sync --extra dashboard`; the
+  Dockerfile installs it in one stage so the Dagster webserver and daemon images never carry it.
+  The boundary is enforced rather than intended — `tests/test_import_containment.py` fails if
+  anything under `src/energy_platform` imports `streamlit` or `altair`, which is the same fence
+  matplotlib has had since M8, and it also keeps the dependency pointing one way: `dashboard/`
+  imports the package, never the reverse.
+- **Altair rather than a new plotting stack.** It already ships inside Streamlit, so it adds no
+  wheel, and it gives the encoding control three charts genuinely need: colour bound to a scenario
+  key rather than to its position, a role set apart without implying a rank, and a diverging axis
+  around zero. Colours come from `energy_platform.palette`, the module `scripts/report_regret.py`
+  draws the README figure from — so blue means *forecast-driven* in the figure and on the page by
+  construction rather than by coincidence.
+
 ## Engineering invariants
 
 - **Idempotent, re-runnable ingestion** — content-hash verification, safe backfills.
@@ -692,6 +785,11 @@ Design decisions worth calling out:
   hash-guaranteed, because an optimal schedule is not unique. Model training is weaker still:
   bit-reproducible only at a pinned thread count, with no cross-platform claim at all. Stretching
   any one of these to cover the others would make it false.
+- **Presentation computes nothing** — every number the dashboard shows is a column of a mart. The
+  app reshapes and formats; it never re-derives a cost, a rate or a metric. Enforced by a read-only
+  role that can see the marts schema and nothing else, an AST guard confining SQL to one module, and
+  a per-column contract checked against the built warehouse in CI. If a figure is missing, the fix
+  is a mart.
 - **Orderings are asserted only where they are theorems** — the hindsight optimum is provably never
   worse than any trajectory feasible for its own problem, and that is enforced in the property tests
   and in the warehouse. "Forecasting beats doing nothing clever" is an empirical result about a
@@ -709,9 +807,27 @@ Requires [uv](https://docs.astral.sh/uv/), [just](https://github.com/casey/just)
 ```bash
 just install     # install locked dependencies
 just check       # lint + strict type-check + tests
-just demo        # boot Dagster + Postgres -> http://localhost:3000
+just demo        # boot the stack -> Dagster :3000, dashboard :8501
+just dbt-seed    # offline demo data into the raw zone
+just warehouse   # build every mart
 just demo-down   # stop and drop the Postgres volume
 ```
+
+`just demo` boots the stack detached and prints both URLs. It does **not** load data: the dashboard
+opens in a designed "no data yet" state naming the next two commands, which is where a stranger's
+first click actually lands. Timings measured on the author's machine, and stated separately because
+they differ by two orders of magnitude:
+
+| | |
+| --- | --- |
+| `just demo`, images already built | **~8 s** to a serving dashboard |
+| `just demo` on a fresh clone | **a few minutes** — one `docker build`, almost all of it installing locked dependencies, paid once |
+| `just dbt-seed` + `just warehouse` | **minutes** — offline ingestion, then a dbt build, sixteen model fits and sixty days of MILP |
+
+The last row is why seeding is a separate step and not folded into `just demo`. It could be, and
+then the demo would take minutes and the sixty-second promise would quietly be false; a stack that
+boots in seconds into an honest empty state is the better trade. Both seeding commands are offline —
+recorded fixtures, no API keys.
 
 ## Development
 
@@ -730,6 +846,9 @@ just demo-down   # stop and drop the Postgres volume
 | `just forecast-reset` | drop synthetic vintages so a changed generator can re-seed |
 | `just dbt-reconcile` | assert the Python tariff engine matches the SQL |
 | `just dbt-docs`  | generate the dbt docs site                     |
+| `just dashboard` | run the Streamlit dashboard on the host        |
+| `just dashboard-grants` | create/refresh the dashboard's read-only role |
+| `just demo-logs` | follow the detached stack's logs               |
 | `just lock`      | regenerate `uv.lock` after changing deps       |
 
 Any backfill accepts `--offline` (or `ENERGY_OFFLINE=1`) to serve SMARD/Open-Meteo from recorded
@@ -741,9 +860,14 @@ tests execute), a `dbt` job that rebuilds and tests the warehouse on offline-see
 dispatch optimizer, backtests the forecast models, rolls the forward-looking simulation, builds the
 four read-back marts, asserts the committed README figure still matches the warehouse, and then runs
 the warehouse guards — the no-lookahead manifest check and the Python↔SQL tariff, dispatch and
-forecast-metric reconciliations, all of which hard-fail rather than skip there — and
-`docker compose config` validation on every push and PR; the dbt docs site publishes to GitHub Pages
-on merge to main.
+forecast-metric reconciliations, all of which hard-fail rather than skip there — plus the dashboard
+smoke tests, which render all four pages against the built warehouse and assert every column the app
+selects exists — and `docker compose config` validation on every push and PR; the dbt docs site
+publishes to GitHub Pages on merge to main.
+
+The dashboard's empty-warehouse tests run in the *quality* job instead, on every push: they need no
+marts, which is the point of them, and a graceful-degradation test that only ever runs against data
+proves nothing.
 
 ## License
 

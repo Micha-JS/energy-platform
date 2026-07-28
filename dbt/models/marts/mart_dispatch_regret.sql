@@ -177,6 +177,13 @@ select
     naive_cost_eur - hindsight_cost_eur              as available_savings_eur,
     -- What forecast-driven dispatch actually delivered over naive. May be negative.
     naive_cost_eur - forecast_driven_cost_eur        as realised_savings_eur,
+    -- What the same day-ahead controller would have delivered over naive given perfect forecasts:
+    -- the numerator of attainable_value_share below, which was previously computed only inside
+    -- that ratio. Exposed as its own column at M9 so the three savings figures the dashboard sets
+    -- side by side -- realised, attainable, available -- are all mart columns. Deriving this one
+    -- from a share and a total in the presentation layer would have been exactly the recomputation
+    -- the mart-only rule exists to prevent.
+    naive_cost_eur - perfect_foresight_cost_eur      as attainable_savings_eur,
 
     -- THE HEADLINE. Fraction of the naive -> optimal gap that forecast-driven dispatch captured.
     -- Null where there was no gap to capture: dividing by a prize of zero produces a number with

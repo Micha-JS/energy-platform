@@ -41,6 +41,10 @@ FORECASTING = SRC / "forecasting"
 # never be imported by first-party code outside forecasting/).
 SCIENTIFIC_STACK = frozenset({"numpy", "pandas", "scipy", "sklearn", "pvlib", "joblib"})
 
+# M9's dashboard extra. Banned from src/ entirely rather than confined to a subpackage -- the same
+# rule matplotlib gets, and for the same reason: these belong to a layer above the platform.
+PRESENTATION_STACK = frozenset({"streamlit", "altair"})
+
 # Dynamic-import escape hatches. `importlib.metadata` is legitimately used to report the solver
 # version (dispatch/optimizer.py), so the ban is on the two functions that can smuggle a module
 # past a static walk -- not on the package.
@@ -155,6 +159,42 @@ def test_matplotlib_stays_out_of_the_package_entirely() -> None:
     assert not offenders, (
         "matplotlib is a dev-only reporting dependency and must not be imported anywhere under "
         f"src/energy_platform -- put the figure in scripts/ instead. Offenders: {sorted(offenders)}"
+    )
+
+
+def test_the_presentation_stack_stays_out_of_the_package_entirely() -> None:
+    """M9's dashboard is a layer on top of the platform, not a capability of it.
+
+    The same shape of rule as matplotlib's above, one milestone later and for the same reason.
+    Streamlit and Altair are an optional extra (pyproject's ``dashboard`` extra), so the Dagster
+    webserver and daemon images never carry them; the moment a module under ``src/`` imports one,
+    that separation is gone and the extra may as well be a runtime dependency.
+
+    It also protects the direction of the dependency. ``dashboard/`` imports the package -- for
+    ``PostgresConfig`` and the shared palette -- and the package must not import back, or the
+    presentation layer stops being something you can delete without touching the platform.
+    """
+    offenders = {
+        str(path.relative_to(SRC))
+        for path in sorted(SRC.rglob("*.py"))
+        if _import_roots(ast.parse(path.read_text())) & PRESENTATION_STACK
+    }
+    assert not offenders, (
+        "streamlit and altair are an optional dashboard extra and must not be imported anywhere "
+        f"under src/energy_platform -- the app lives in dashboard/. Offenders: {sorted(offenders)}"
+    )
+
+
+def test_the_dashboard_actually_imports_the_presentation_stack() -> None:
+    """Positive control for the guard above, mirroring the forecasting one below."""
+    dashboard = SRC.parents[1] / "dashboard"
+    assert dashboard.is_dir(), f"{dashboard} is missing; the presentation guard is vacuous"
+    imported: set[str] = set()
+    for path in sorted(dashboard.rglob("*.py")):
+        imported |= _import_roots(ast.parse(path.read_text())) & PRESENTATION_STACK
+    assert {"streamlit", "altair"} <= imported, (
+        "dashboard/ is expected to import streamlit and altair -- if it no longer does, the guard "
+        f"above is asserting nothing. Found: {sorted(imported)}"
     )
 
 
