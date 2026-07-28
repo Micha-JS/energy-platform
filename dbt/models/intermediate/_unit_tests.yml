@@ -53,3 +53,33 @@ unit_tests:
       rows:
         - {ts_utc: "2024-06-12 10:00:00+00", region: "home",  price_eur_mwh: 50.0, pv_production_kwh: 3.0, household_load_kwh: 1.0, soc_frac: 0.6, balance_residual_kwh: 2.0}
         - {ts_utc: "2024-06-12 10:00:00+00", region: "siteB", price_eur_mwh: 50.0, pv_production_kwh: 3.0, household_load_kwh: 1.0, soc_frac: 0.6, balance_residual_kwh: 2.0}
+
+  # M10's load split is a decomposition of household_load, not an addition to the node. The
+  # tempting mistake is to treat ac_power as another consumer and subtract it a second time, which
+  # would make balance_residual_kwh non-zero on a perfectly balanced hour and quietly poison every
+  # downstream energy-conservation check. This pins the decomposition: same hour, once with the
+  # split present and once with both components NULL (the real-house case), identical residual.
+  - name: load_split_does_not_enter_the_energy_balance
+    model: int_hourly_energy
+    description: >
+      household_load_kwh is the only consumption term in the AC-node identity. Whether the split
+      columns are populated or NULL must not change balance_residual_kwh. Fails on any model that
+      subtracts ac_power_kwh a second time, or that coalesces the components into the balance.
+    given:
+      - input: ref('int_hourly_spine')
+        rows:
+          - {ts_utc: "2024-06-12 10:00:00+00", region: "split",   local_ts: "2024-06-12 12:00:00", local_date: "2024-06-12", local_hour: 12}
+          - {ts_utc: "2024-06-12 10:00:00+00", region: "unsplit", local_ts: "2024-06-12 12:00:00", local_date: "2024-06-12", local_hour: 12}
+      - input: ref('stg_telemetry')
+        rows:
+          # 2.0 total = 1.4 base + 0.6 air conditioning; the balance closes exactly.
+          - {source: "synthetic", ts_utc: "2024-06-12 10:00:00+00", region: "split",   pv_production_kwh: 3.0, household_load_kwh: 2.0, load_base_kwh: 1.4, ac_power_kwh: 0.6, indoor_temp_c: 23.5, battery_charge_kwh: 1.0, battery_discharge_kwh: 0.0, soc_frac: 0.6, grid_import_kwh: 0.0, grid_export_kwh: 0.0}
+          # The same hour from a house that cannot separate the two -- components NULL, total intact.
+          - {source: "synthetic", ts_utc: "2024-06-12 10:00:00+00", region: "unsplit", pv_production_kwh: 3.0, household_load_kwh: 2.0, load_base_kwh: null, ac_power_kwh: null, indoor_temp_c: null, battery_charge_kwh: 1.0, battery_discharge_kwh: 0.0, soc_frac: 0.6, grid_import_kwh: 0.0, grid_export_kwh: 0.0}
+      - input: ref('stg_prices')
+        rows:
+          - {source: "smard", ts_utc: "2024-06-12 10:00:00+00", region: "DE", resolution: "hour", price_eur_mwh: 50.0}
+    expect:
+      rows:
+        - {ts_utc: "2024-06-12 10:00:00+00", region: "split",   household_load_kwh: 2.0, load_base_kwh: 1.4, ac_power_kwh: 0.6, balance_residual_kwh: 0.0}
+        - {ts_utc: "2024-06-12 10:00:00+00", region: "unsplit", household_load_kwh: 2.0, load_base_kwh: null, ac_power_kwh: null, balance_residual_kwh: 0.0}

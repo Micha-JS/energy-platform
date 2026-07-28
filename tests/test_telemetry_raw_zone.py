@@ -12,7 +12,12 @@ from datetime import date
 
 import pytest
 
-from energy_platform.config import BatteryConfig, PvSystemConfig, SyntheticConfig
+from energy_platform.config import (
+    BatteryConfig,
+    PvSystemConfig,
+    SyntheticConfig,
+    ThermalConfig,
+)
 from energy_platform.connectors.synthetic import (
     TELEMETRY_DATASETS,
     SyntheticTelemetryClient,
@@ -32,6 +37,7 @@ pytestmark = pytest.mark.postgres
 PV = PvSystemConfig()
 BATTERY = BatteryConfig()
 SYNTHETIC = SyntheticConfig()
+THERMAL = ThermalConfig()
 DAY = date(2024, 6, 15)
 WINDOW = berlin_day_window(DAY)
 SITE = "home"
@@ -85,7 +91,9 @@ def _ingest_weather(repo: RawZoneRepository, ghi_peak: float) -> None:
 
 
 def _ingest_telemetry(repo: RawZoneRepository) -> list[WriteOutcome]:
-    client = SyntheticTelemetryClient(repo, pv=PV, battery=BATTERY, synthetic=SYNTHETIC)
+    client = SyntheticTelemetryClient(
+        repo, pv=PV, battery=BATTERY, synthetic=SYNTHETIC, thermal=THERMAL
+    )
     return [
         ingest_partition(client, repo, dataset, SITE, Resolution.HOUR, DAY).outcome
         for dataset in TELEMETRY_DATASETS
@@ -178,3 +186,6 @@ def test_stored_telemetry_conserves_energy_each_hour(raw_repo: RawZoneRepository
         exp = row[Dataset.GRID_EXPORT]
         chg = row[Dataset.BATTERY_CHARGE]
         assert (pv + imp + dis) == pytest.approx(load + exp + chg, abs=0.005)
+        # The load split survives the round trip through Postgres exactly, not approximately --
+        # the components are quantised before the total is formed, so nothing here can drift.
+        assert load == row[Dataset.LOAD_BASE] + row[Dataset.AC_POWER]

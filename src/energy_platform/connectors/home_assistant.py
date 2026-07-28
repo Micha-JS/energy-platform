@@ -26,9 +26,23 @@ Conversion from Home Assistant state history to the hourly raw-zone grid:
   ``unknown``, the hour is ``None`` -- surfaced, never back-filled with a guess.
 * **SoC** is a *level*, not a flow, so it is sampled at the end of the hour and converted from
   percent to a fraction. An unknown level is ``None``.
+* **Indoor temperature** (M10) is also sampled at the end of the hour, but in the sensor's own
+  degrees Celsius -- no scaling. It gets its own branch rather than joining SoC's because a
+  temperature silently divided by 100 would still plot as a smooth, plausible line.
 
 Cumulative energy-counter entities (hourly = end-of-hour minus start-of-hour reading) are a
 small future extension; the power-sensor model above is what M3 ships.
+
+**Real-mode AC power needs its own meter, and where there is none the channel is null.** M10 adds
+``load_base`` and ``ac_power`` as separable components of ``household_load``, but nothing in a
+Fenecon reading can separate them: the inverter meters the house, not the appliances. A real
+deployment must point ``ac_power`` at a genuinely separate source -- the Samsung/HVAC integration's
+own power sensor, or an external plug/circuit meter -- and map it through
+``ENERGY_HA_ENTITY_MAP``. Where no such entity is configured, ``ac_power`` and ``load_base`` are
+simply **not ingested**: they are never estimated, never derived by subtraction, and never assumed
+to be zero. ``household_load`` continues to stand alone as the canonical total, and the warehouse's
+load-split identity is scoped to hours where all three are present precisely so that this house
+remains a first-class citizen rather than a test failure.
 """
 
 from __future__ import annotations
@@ -49,8 +63,13 @@ SOURCE_TZ: Final = "UTC"
 
 USER_AGENT: Final = "energy-platform/0.1 (+https://github.com; Home Assistant connector)"
 
-# SoC is a level entity; the six energy flows are power (W) entities integrated to kWh.
-_LEVEL_DATASETS: Final = frozenset({Dataset.SOC})
+# Three conversions, because "is it a level or a flow?" is not the only question -- a level still
+# has to be in the right units. SoC arrives as a percentage and is divided by 100; indoor
+# temperature arrives in degrees and must be sampled *without* being scaled, which is why it cannot
+# simply join _PERCENT_LEVEL_DATASETS. Everything else is an instantaneous power sensor in watts,
+# integrated over the hour to kWh.
+_PERCENT_LEVEL_DATASETS: Final = frozenset({Dataset.SOC})
+_SAMPLED_DATASETS: Final = frozenset({Dataset.INDOOR_TEMPERATURE})
 _UNKNOWN_STATES: Final = frozenset({"unavailable", "unknown", "none", ""})
 
 _RETRYABLE_STATUS: Final = frozenset({408, 429, 500, 502, 503, 504})
@@ -118,9 +137,13 @@ class HomeAssistantClient:
         url, params = self.build_history_request(entity, window)
         samples = _parse_history(self._get_json(url, params), entity)
 
-        if dataset in _LEVEL_DATASETS:
+        if dataset in _PERCENT_LEVEL_DATASETS:
             points = tuple(
-                (ts, _level_at(samples, ts + _HOUR_MS)) for ts in utc_hour_instants(window)
+                (ts, _percent_level_at(samples, ts + _HOUR_MS)) for ts in utc_hour_instants(window)
+            )
+        elif dataset in _SAMPLED_DATASETS:
+            points = tuple(
+                (ts, _sampled_at(samples, ts + _HOUR_MS)) for ts in utc_hour_instants(window)
             )
         else:
             points = tuple(
@@ -241,10 +264,20 @@ def _integrate_power_kwh(samples: list[_Sample], h0: int, h1: int) -> float | No
     return wh / 1000.0
 
 
-def _level_at(samples: list[_Sample], instant: int) -> float | None:
+def _percent_level_at(samples: list[_Sample], instant: int) -> float | None:
     """The level (percent) in effect at ``instant``, as a fraction; ``None`` if unknown."""
     value = _active_value(samples, instant)
     return None if value is None else value / 100.0
+
+
+def _sampled_at(samples: list[_Sample], instant: int) -> float | None:
+    """The state in effect at ``instant``, in the sensor's own units; ``None`` if unknown.
+
+    Used for indoor temperature, whose degrees Celsius are already the unit the raw zone wants --
+    the point of a separate function from :func:`_percent_level_at` is that a temperature quietly
+    divided by 100 would still look plausible in a chart.
+    """
+    return _active_value(samples, instant)
 
 
 def _active_value(samples: list[_Sample], instant: int) -> float | None:

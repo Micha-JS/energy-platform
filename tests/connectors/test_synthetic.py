@@ -15,16 +15,24 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from energy_platform.config import BatteryConfig, PvSystemConfig, SyntheticConfig
+from energy_platform.config import (
+    BatteryConfig,
+    PvSystemConfig,
+    SyntheticConfig,
+    ThermalConfig,
+)
 from energy_platform.connectors.synthetic import (
     TELEMETRY_DATASETS,
     SyntheticTelemetryClient,
     SyntheticTelemetryError,
     dispatch_hour,
     emit,
+    initial_indoor_temp_c,
     pv_production_kwh,
     seed_for,
     simulate_day,
+    thermal_step,
+    thermostat_step,
     utc_hour_instants,
 )
 from energy_platform.connectors.types import Dataset, Point, Resolution
@@ -33,6 +41,7 @@ from energy_platform.orchestration.ingest import berlin_day_window, content_hash
 PV = PvSystemConfig()
 BATTERY = BatteryConfig()
 SYNTHETIC = SyntheticConfig()
+THERMAL = ThermalConfig()
 
 # A clear-ish summer day (no DST transition -> a clean 24-hour window).
 DAY = date(2024, 6, 15)
@@ -83,8 +92,8 @@ def test_emit_quantises_to_wh_and_normalises_zero() -> None:
 
 def test_simulate_day_is_deterministic() -> None:
     ghi, temp = _bell_ghi(), _flat_temp()
-    first = simulate_day(DAY, WINDOW, ghi, temp, PV, BATTERY, SYNTHETIC)
-    second = simulate_day(DAY, WINDOW, ghi, temp, PV, BATTERY, SYNTHETIC)
+    first = simulate_day(DAY, WINDOW, ghi, temp, PV, BATTERY, SYNTHETIC, THERMAL)
+    second = simulate_day(DAY, WINDOW, ghi, temp, PV, BATTERY, SYNTHETIC, THERMAL)
     assert first == second
     # Determinism is what makes re-ingestion a no-op: identical points -> identical hash.
     for dataset, points in first.items():
@@ -94,7 +103,7 @@ def test_simulate_day_is_deterministic() -> None:
 
 
 def test_every_series_has_one_point_per_hour() -> None:
-    series = simulate_day(DAY, WINDOW, _bell_ghi(), _flat_temp(), PV, BATTERY, SYNTHETIC)
+    series = simulate_day(DAY, WINDOW, _bell_ghi(), _flat_temp(), PV, BATTERY, SYNTHETIC, THERMAL)
     assert set(series) == set(TELEMETRY_DATASETS)
     for points in series.values():
         assert len(points) == WINDOW.expected_count(Resolution.HOUR)
@@ -105,7 +114,7 @@ def test_missing_irradiance_nulls_every_series_for_that_hour() -> None:
     instants = utc_hour_instants(WINDOW)
     gap = instants[12]
     ghi[gap] = None  # midday hole
-    series = simulate_day(DAY, WINDOW, ghi, _flat_temp(), PV, BATTERY, SYNTHETIC)
+    series = simulate_day(DAY, WINDOW, ghi, _flat_temp(), PV, BATTERY, SYNTHETIC, THERMAL)
     for dataset in TELEMETRY_DATASETS:
         by_ts = dict(series[dataset])
         assert by_ts[gap] is None, dataset
@@ -117,7 +126,7 @@ def test_absent_irradiance_row_also_nulls_the_hour() -> None:
     ghi = _bell_ghi()
     instants = utc_hour_instants(WINDOW)
     del ghi[instants[10]]
-    series = simulate_day(DAY, WINDOW, ghi, _flat_temp(), PV, BATTERY, SYNTHETIC)
+    series = simulate_day(DAY, WINDOW, ghi, _flat_temp(), PV, BATTERY, SYNTHETIC, THERMAL)
     assert dict(series[Dataset.PV_PRODUCTION])[instants[10]] is None
 
 
@@ -144,6 +153,132 @@ def test_missing_temperature_applies_no_derate() -> None:
 def test_pv_never_negative() -> None:
     # A physically absurd temperature drives the linear derate below zero; output floors at 0.
     assert pv_production_kwh(500.0, 400.0, PV) == 0.0
+
+
+# -- The conditioned zone (M10) --------------------------------------------------------
+
+
+def test_thermostat_latches_across_the_deadband() -> None:
+    # Below the band: off, and stays off through the band on the way up.
+    assert thermostat_step(20.0, False, THERMAL) is False
+    assert thermostat_step(24.2, False, THERMAL) is False  # inside the band, not yet triggered
+    # At the upper edge it fires, and then holds on all the way back down through the band...
+    assert thermostat_step(24.5, False, THERMAL) is True
+    assert thermostat_step(24.0, True, THERMAL) is True
+    assert thermostat_step(23.6, True, THERMAL) is True
+    # ...releasing only at the lower edge. Without this latch it is a comparator, not a thermostat.
+    assert thermostat_step(23.5, True, THERMAL) is False
+
+
+def test_ac_runs_when_hot_and_never_when_cold() -> None:
+    hot = thermal_step(26.0, 30.0, 800.0, False, THERMAL)
+    assert hot.ac_power_kwh == THERMAL.rated_kw
+    assert hot.indoor_temp_c < 26.0  # cooling actually removes heat
+
+    cold = thermal_step(21.0, 2.0, 0.0, False, THERMAL)
+    assert cold.ac_power_kwh == 0.0
+
+
+def test_heating_is_a_floor_and_never_an_electrical_load() -> None:
+    # A freezing night pulls the zone down; the floor holds it, and draws no `ac_power` doing so,
+    # because the house's heating is not electric. Modelling it as a load would put a phantom
+    # winter consumer into every downstream cost.
+    zone = thermal_step(20.5, -10.0, 0.0, False, THERMAL)
+    assert zone.indoor_temp_c == THERMAL.heating_setpoint_c
+    assert zone.ac_power_kwh == 0.0
+
+
+def test_the_zone_is_deterministic_and_draws_no_randomness() -> None:
+    # The RC model must not touch the RNG: the generator's stream is aligned one draw per hour to
+    # the household-load profile, and an extra draw would silently rewrite every historical value.
+    a = thermal_step(25.0, 28.0, 600.0, False, THERMAL)
+    b = thermal_step(25.0, 28.0, 600.0, False, THERMAL)
+    assert a == b
+
+
+def test_initial_temperature_is_forgotten() -> None:
+    """The daily reset's influence decays, and this is the number that says how fast.
+
+    ``initial_indoor_temp_c`` picks the day's start from the day's own weather rather than from a
+    constant, precisely so this bound can be tight. Two plausible starting states -- the
+    controller's equilibrium and a zone 3 K warmer -- must agree well before the day is out; if a
+    future change to R, C or the thermostat made the reset visible across the whole day, the
+    series would carry a one-day sawtooth and this test is what notices.
+    """
+    outdoor, ghi = 26.0, 500.0
+    settled = initial_indoor_temp_c(outdoor, ghi, THERMAL)
+
+    def trajectory(start: float) -> list[float]:
+        temp, on, out = start, False, []
+        for _ in range(24):
+            zone = thermal_step(temp, outdoor, ghi, on, THERMAL)
+            temp, on = zone.indoor_temp_c, zone.compressor_on
+            out.append(temp)
+        return out
+
+    disturbed = trajectory(settled + 3.0)
+    baseline = trajectory(settled)
+    # Within eight hours the 3 K disturbance is down to well under half a deadband.
+    assert abs(disturbed[7] - baseline[7]) < THERMAL.deadband_k / 2
+
+
+def test_the_daily_start_tracks_the_season_instead_of_a_constant() -> None:
+    # Cold day -> the heating floor; hot day -> the cooling setpoint; mild day -> in between.
+    # A constant start would put a cold March day 4 K above where the house actually sits and let
+    # it decay all day, since nothing heats the zone back down within one R*C.
+    assert initial_indoor_temp_c(2.0, 50.0, THERMAL) == THERMAL.heating_setpoint_c
+    assert initial_indoor_temp_c(30.0, 700.0, THERMAL) == THERMAL.setpoint_c
+    mild = initial_indoor_temp_c(21.0, 300.0, THERMAL)
+    assert THERMAL.heating_setpoint_c <= mild <= THERMAL.setpoint_c
+
+
+def test_load_base_is_bit_identical_to_the_pre_m10_household_load() -> None:
+    """The split adds the AC on top; it does not redistribute what was already there.
+
+    ``load_base`` must reproduce exactly what ``household_load`` used to be, which is only true if
+    the thermal model draws no randomness -- one stray ``rng`` call would shift the whole stream
+    and quietly rewrite the seeded history. Reconstructing the old series from the same public
+    function the generator uses is the check.
+    """
+    import random
+
+    from energy_platform.connectors.synthetic import household_load_kwh, quantise, seed_for
+
+    series = simulate_day(DAY, WINDOW, _bell_ghi(), _flat_temp(), PV, BATTERY, SYNTHETIC, THERMAL)
+    rng = random.Random(seed_for(SYNTHETIC.salt, DAY))
+    expected = [
+        quantise(household_load_kwh(ts, rng, SYNTHETIC)) for ts in utc_hour_instants(WINDOW)
+    ]
+
+    assert [value for _, value in series[Dataset.LOAD_BASE]] == expected
+
+
+def test_missing_outdoor_temperature_nulls_the_hour() -> None:
+    # Outdoor temperature became load-bearing at M10: it is the RC model's driving input, so an
+    # hour without it cannot be simulated at all. Before M10 it was a second-order PV derate an
+    # hour could do without, and `pv_production_kwh` still behaves that way as a pure function.
+    temp = _flat_temp()
+    instants = utc_hour_instants(WINDOW)
+    gap = instants[13]
+    temp[gap] = None
+    series = simulate_day(DAY, WINDOW, _bell_ghi(), temp, PV, BATTERY, SYNTHETIC, THERMAL)
+    for dataset in TELEMETRY_DATASETS:
+        by_ts = dict(series[dataset])
+        assert by_ts[gap] is None, dataset
+        assert by_ts[instants[12]] is not None, dataset
+
+
+def test_indoor_temperature_stays_habitable_across_the_year() -> None:
+    # A cheap sanity net on the oracle M11 will learn from: whatever the weather, the modelled
+    # house stays in a range a person would live in. A regression that inverted a sign or dropped
+    # the heating floor would show up here long before it showed up as a strange optimiser.
+    for outdoor in (-15.0, 0.0, 10.0, 20.0, 35.0):
+        temp, on = THERMAL.setpoint_c, False
+        for hour in range(72):
+            ghi = 700.0 if hour % 24 in range(9, 17) else 0.0
+            zone = thermal_step(temp, outdoor, ghi, on, THERMAL)
+            temp, on = zone.indoor_temp_c, zone.compressor_on
+            assert THERMAL.heating_setpoint_c - 0.01 <= temp <= 30.0, (outdoor, hour, temp)
 
 
 # -- Property tests: the invariants ----------------------------------------------------
@@ -211,7 +346,7 @@ def test_simulated_day_conserves_energy_on_rounded_values(
     temp = dict(zip(instants, temp_values, strict=True))
     synthetic = SyntheticConfig(annual_load_kwh=annual_load)
 
-    series = simulate_day(DAY, WINDOW, ghi, temp, PV, battery, synthetic)
+    series = simulate_day(DAY, WINDOW, ghi, temp, PV, battery, synthetic, THERMAL)
     by_ts: dict[Dataset, dict[int, float | None]] = {
         d: dict(points) for d, points in series.items()
     }
@@ -220,21 +355,30 @@ def test_simulated_day_conserves_energy_on_rounded_values(
         maybe = {d: by_ts[d][ts] for d in TELEMETRY_DATASETS}
         if any(v is None for v in maybe.values()):
             continue  # unsimulatable hour: surfaced as null, not asserted
-        row = {d: v for d, v in maybe.items() if v is not None}  # all seven present here
+        row = {d: v for d, v in maybe.items() if v is not None}  # all ten present here
 
         pv = row[Dataset.PV_PRODUCTION]
         load = row[Dataset.HOUSEHOLD_LOAD]
+        base = row[Dataset.LOAD_BASE]
+        ac = row[Dataset.AC_POWER]
         charge = row[Dataset.BATTERY_CHARGE]
         discharge = row[Dataset.BATTERY_DISCHARGE]
         imp = row[Dataset.GRID_IMPORT]
         exp = row[Dataset.GRID_EXPORT]
         soc = row[Dataset.SOC]
         assert pv >= 0 and load >= 0 and charge >= 0 and discharge >= 0
+        assert base >= 0 and ac >= 0
         assert imp >= 0 and exp >= 0
         assert min(imp, exp) == 0.0  # mutually exclusive after rounding
 
-        # AC-node balance on the independently-rounded values; tolerance budgets the six
-        # 0.5 Wh quantisations comfortably (a few Wh), well below any real imbalance.
+        # The load split is EXACT, not approximate: the generator quantises the two components
+        # and publishes their quantised sum, so this is the one identity here that needs no
+        # tolerance budget. Asserting it loosely would hide precisely the drift it exists to catch.
+        assert load == base + ac
+
+        # AC-node balance on the rounded values. The battery dispatches against the published
+        # total, so only pv/import/export/charge/discharge round independently of it -- and the
+        # tolerance budgets those five 0.5 Wh quantisations, comfortably below any real imbalance.
         assert (pv + imp + discharge) == pytest.approx(load + exp + charge, abs=0.005)
         assert battery.soc_min - 1e-3 <= soc <= battery.soc_max + 1e-3
 
@@ -273,8 +417,10 @@ def _reader_with_weather() -> _StubReader:
 
 def test_client_fetches_each_dataset_and_matches_pure_simulation() -> None:
     reader = _reader_with_weather()
-    client = SyntheticTelemetryClient(reader, pv=PV, battery=BATTERY, synthetic=SYNTHETIC)
-    expected = simulate_day(DAY, WINDOW, _bell_ghi(), _flat_temp(), PV, BATTERY, SYNTHETIC)
+    client = SyntheticTelemetryClient(
+        reader, pv=PV, battery=BATTERY, synthetic=SYNTHETIC, thermal=THERMAL
+    )
+    expected = simulate_day(DAY, WINDOW, _bell_ghi(), _flat_temp(), PV, BATTERY, SYNTHETIC, THERMAL)
 
     for dataset in TELEMETRY_DATASETS:
         raw = client.fetch_window(dataset, "home", Resolution.HOUR, WINDOW)
@@ -284,7 +430,9 @@ def test_client_fetches_each_dataset_and_matches_pure_simulation() -> None:
 
 def test_client_simulates_once_per_window() -> None:
     reader = _reader_with_weather()
-    client = SyntheticTelemetryClient(reader, pv=PV, battery=BATTERY, synthetic=SYNTHETIC)
+    client = SyntheticTelemetryClient(
+        reader, pv=PV, battery=BATTERY, synthetic=SYNTHETIC, thermal=THERMAL
+    )
     for dataset in TELEMETRY_DATASETS:
         client.fetch_window(dataset, "home", Resolution.HOUR, WINDOW)
     # Seven datasets, one simulation: two reads (irradiance + temperature), not fourteen.
@@ -293,7 +441,7 @@ def test_client_simulates_once_per_window() -> None:
 
 def test_client_rejects_non_hourly_resolution() -> None:
     client = SyntheticTelemetryClient(
-        _reader_with_weather(), pv=PV, battery=BATTERY, synthetic=SYNTHETIC
+        _reader_with_weather(), pv=PV, battery=BATTERY, synthetic=SYNTHETIC, thermal=THERMAL
     )
     with pytest.raises(SyntheticTelemetryError):
         client.fetch_window(Dataset.PV_PRODUCTION, "home", Resolution.QUARTERHOUR, WINDOW)
@@ -301,7 +449,7 @@ def test_client_rejects_non_hourly_resolution() -> None:
 
 def test_client_rejects_non_telemetry_dataset() -> None:
     client = SyntheticTelemetryClient(
-        _reader_with_weather(), pv=PV, battery=BATTERY, synthetic=SYNTHETIC
+        _reader_with_weather(), pv=PV, battery=BATTERY, synthetic=SYNTHETIC, thermal=THERMAL
     )
     with pytest.raises(SyntheticTelemetryError):
         client.fetch_window(Dataset.DAY_AHEAD_PRICE, "home", Resolution.HOUR, WINDOW)

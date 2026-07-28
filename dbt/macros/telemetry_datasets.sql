@@ -15,6 +15,9 @@
     {%- set datasets = [
         'pv_production',
         'household_load',
+        'load_base',
+        'ac_power',
+        'indoor_temperature',
         'battery_charge',
         'battery_discharge',
         'soc',

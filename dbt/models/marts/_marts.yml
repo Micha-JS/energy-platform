@@ -23,8 +23,32 @@ models:
         tests:
           - dbt_utils.accepted_range: {min_value: 0, config: {where: "pv_production_kwh is not null"}}
       - name: household_load_kwh
+        description: >
+          Total household consumption -- the canonical figure every energy identity in this mart is
+          written in terms of. Separable from M10 into load_base_kwh + ac_power_kwh, but never
+          derived from them; see assert_load_split_identity.
         tests:
           - dbt_utils.accepted_range: {min_value: 0, config: {where: "household_load_kwh is not null"}}
+      - name: load_base_kwh
+        description: >
+          Consumption excluding the air conditioner. NULL where the producer cannot separate the
+          two -- a house with a single consumption meter reports household_load_kwh alone.
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "load_base_kwh is not null"}}
+      - name: ac_power_kwh
+        description: >
+          Electrical energy drawn by the air conditioner. A *component of* household_load_kwh, not
+          an additional term in the AC-node balance -- balance_residual_kwh is unaffected by the
+          split. NULL where no separate AC meter is configured.
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "ac_power_kwh is not null"}}
+      - name: indoor_temp_c
+        description: >
+          Zone air temperature at the end of the hour, degrees Celsius. A state rather than a flow,
+          and the series M11's thermal work is built on. In demo mode it comes from a single-zone RC
+          model driven by outdoor temperature and irradiance; in real mode from a room sensor.
+        tests:
+          - dbt_utils.accepted_range: {min_value: -40, max_value: 50, config: {where: "indoor_temp_c is not null"}}
 
   - name: mart_tariff_counterfactuals
     description: >

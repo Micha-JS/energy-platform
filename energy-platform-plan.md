@@ -122,6 +122,34 @@ energy-platform/
   claim that would be false in both directions. That empty path is tested on every push, because it
   is the first thing that happens to a stranger's clone.
 
+### M10 — Plan publisher + thermal telemetry
+- **Publisher** (`src/energy_platform/publishing/`): read the day's forward plan out of the
+  derived-results layer and publish it to MQTT as a **retained, versioned JSON document** a Home
+  Assistant instance can consume — per-hour battery charge/discharge, expected grid exchange, and
+  plan metadata (issue time, coverage window, tariff, model/config hashes). The payload is a
+  **recommendation, not a command**: this repo never actuates, and the schema says so in a field
+  rather than only in prose. Broker host/credentials env-only, disabled by default like the real HA
+  connector; retention makes a republished plan an overwrite, never a duplicate stream.
+- **Thermal telemetry**: two new channels — indoor temperature and AC power — through the existing
+  connector pattern end to end. The synthetic generator gains a deterministic one-zone RC model
+  (outdoor temp from M2, configurable R/C, solar gain, a thermostat-driven AC with COP and rated
+  power from the shared physics config); the real HA connector gains the same two entities, with
+  AC power **null where no separately metered source is configured, never estimated**.
+- **Load separability**, the decision M11 depends on: the generator emits `load_base` and
+  `ac_power` as separate channels and keeps emitting `household_load` as their sum, so
+  `household_load = load_base + ac_power` is a *testable identity* rather than a definition. A
+  derived total would be a tautology and could assert nothing; a real total also survives a house
+  with no AC meter, where the components are null and the total still stands.
+- **Done when:** on the seeded windows the day's plan lands on MQTT topics HA could consume, the
+  payload schema is documented well enough to configure HA sensors from it, indoor temperature and
+  AC power flow from synthetic generation through staging into the marts, the real-connector
+  extension is fixture-tested, and CI is green.
+
+### M11 — Thermal optimization *(placeholder)*
+- AC as a flexible load and the house as RC thermal storage: extend the dispatch optimizer to
+  schedule cooling against price and PV, measured against M10's thermostat as the "actual behaviour"
+  baseline.
+
 ---
 
 ## Suggested build order note

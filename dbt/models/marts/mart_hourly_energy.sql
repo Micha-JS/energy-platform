@@ -11,6 +11,9 @@ select
 
     pv_production_kwh,
     household_load_kwh,
+    load_base_kwh,
+    ac_power_kwh,
+    indoor_temp_c,
     battery_charge_kwh,
     battery_discharge_kwh,
     soc_frac,

@@ -10,8 +10,11 @@ import psycopg
 from dagster import ConfigurableResource, InitResourceContext
 
 from energy_platform.config import (
+    DEFAULT_AC_COP,
+    DEFAULT_AC_RATED_KW,
     DEFAULT_BATTERY_CAPACITY_KWH,
     DEFAULT_DERIVED_SCHEMA,
+    DEFAULT_HEATING_SETPOINT_C,
     DEFAULT_MARTS_SCHEMA,
     DEFAULT_OPEN_METEO_ARCHIVE_URL,
     DEFAULT_OPEN_METEO_FORECAST_URL,
@@ -23,9 +26,15 @@ from energy_platform.config import (
     DEFAULT_SITE_ID,
     DEFAULT_SMARD_BASE_URL,
     DEFAULT_STAGING_SCHEMA,
+    DEFAULT_THERMAL_C_KWH_PER_K,
+    DEFAULT_THERMAL_R_K_PER_KW,
+    DEFAULT_THERMAL_SOLAR_GAIN_KW_PER_WM2,
+    DEFAULT_THERMOSTAT_DEADBAND_K,
+    DEFAULT_THERMOSTAT_SETPOINT_C,
     BatteryConfig,
     PvSystemConfig,
     SyntheticConfig,
+    ThermalConfig,
 )
 from energy_platform.connectors.home_assistant import USER_AGENT as HA_USER_AGENT
 from energy_platform.connectors.home_assistant import HomeAssistantClient, HomeAssistantError
@@ -157,6 +166,14 @@ class SyntheticTelemetryResource(ConfigurableResource[SyntheticTelemetryClient])
     battery_round_trip_efficiency: float = 0.90
     synthetic_salt: str = "energy-platform-synthetic-v1"
     synthetic_annual_load_kwh: float = 4000.0
+    thermal_r_k_per_kw: float = DEFAULT_THERMAL_R_K_PER_KW
+    thermal_c_kwh_per_k: float = DEFAULT_THERMAL_C_KWH_PER_K
+    thermal_solar_gain_kw_per_wm2: float = DEFAULT_THERMAL_SOLAR_GAIN_KW_PER_WM2
+    thermostat_setpoint_c: float = DEFAULT_THERMOSTAT_SETPOINT_C
+    thermostat_deadband_k: float = DEFAULT_THERMOSTAT_DEADBAND_K
+    heating_setpoint_c: float = DEFAULT_HEATING_SETPOINT_C
+    ac_cop: float = DEFAULT_AC_COP
+    ac_rated_kw: float = DEFAULT_AC_RATED_KW
     weather_source: str = WEATHER_SOURCE
     default_site_id: str = DEFAULT_SITE_ID
 
@@ -180,6 +197,16 @@ class SyntheticTelemetryResource(ConfigurableResource[SyntheticTelemetryClient])
             synthetic=SyntheticConfig(
                 salt=self.synthetic_salt,
                 annual_load_kwh=self.synthetic_annual_load_kwh,
+            ),
+            thermal=ThermalConfig(
+                r_k_per_kw=self.thermal_r_k_per_kw,
+                c_kwh_per_k=self.thermal_c_kwh_per_k,
+                solar_gain_kw_per_wm2=self.thermal_solar_gain_kw_per_wm2,
+                setpoint_c=self.thermostat_setpoint_c,
+                deadband_k=self.thermostat_deadband_k,
+                heating_setpoint_c=self.heating_setpoint_c,
+                cop=self.ac_cop,
+                rated_kw=self.ac_rated_kw,
             ),
             weather_source=self.weather_source,
         )

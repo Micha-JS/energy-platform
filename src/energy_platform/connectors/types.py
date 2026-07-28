@@ -50,6 +50,19 @@ class Dataset(StrEnum):
     GRID_IMPORT = "grid_import"  # energy imported at the meter, kWh
     GRID_EXPORT = "grid_export"  # energy exported at the meter, kWh
 
+    # -- Thermal channels (M10) --
+    # HOUSEHOLD_LOAD is separable into everything-else and the air conditioner, so that M11 can
+    # treat cooling as a flexible load without having to guess how much of the total it already
+    # was. The split is a second identity, checked wherever all three are present:
+    #   household_load == load_base + ac_power
+    # HOUSEHOLD_LOAD remains the canonical total and keeps its place in the AC-node identity
+    # above: `ac_power` is a *component of* consumption, not an additional node term. Both
+    # components are null where a producer cannot separate them -- a real house with one
+    # consumption meter and no AC sub-meter reports the total and nothing else.
+    LOAD_BASE = "load_base"  # consumption excluding the air conditioner, kWh
+    AC_POWER = "ac_power"  # electrical energy drawn by the air conditioner, kWh
+    INDOOR_TEMPERATURE = "indoor_temperature"  # zone air temperature at end of hour, deg C
+
 
 class Resolution(StrEnum):
     """Temporal resolution of a series, matching SMARD's URL tokens."""

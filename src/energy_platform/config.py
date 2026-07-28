@@ -69,6 +69,34 @@ DEFAULT_BATTERY_CAPACITY_KWH = 14.0
 DEFAULT_PV_TILT_DEG = 35.0
 DEFAULT_PV_AZIMUTH_DEG = 180.0
 
+# The conditioned zone and its air conditioner, added at M10. Same rationale as the battery
+# numbers above: M10's thermostat is the "actual behaviour" baseline that M11's thermal optimiser
+# will be measured against, so both sides must read one physics config or the comparison is an
+# artefact of two different houses.
+#
+# ONE zone, ONE unit, LINEAR dynamics -- deliberately. The generator's job is to be a *knowable*
+# oracle, and every parameter added here is one M11 has to identify later. R is the envelope's
+# thermal resistance (K per kW of heat flow), C its effective capacitance (kWh per K), so the
+# free-running time constant is R*C = 48 h. The solar term converts global horizontal irradiance
+# straight to a heat gain in kW, standing in for glazing area, orientation and shading in a single
+# number rather than three unidentifiable ones.
+DEFAULT_THERMAL_R_K_PER_KW = 6.0
+DEFAULT_THERMAL_C_KWH_PER_K = 8.0
+DEFAULT_THERMAL_SOLAR_GAIN_KW_PER_WM2 = 0.001
+# Thermostat and unit. 24 degC with a 1 K deadband is a conservative German cooling setpoint; COP 3
+# and 2 kW electrical are a mid-size split unit. Sized so the AC is a *visible* load on the seeded
+# summer days -- a unit that never runs would leave M11 with nothing to optimise.
+DEFAULT_THERMOSTAT_SETPOINT_C = 24.0
+DEFAULT_THERMOSTAT_DEADBAND_K = 1.0
+DEFAULT_AC_COP = 3.0
+DEFAULT_AC_RATED_KW = 2.0
+# The floor a German house's heating holds in the shoulder seasons. NOT an electrical load and
+# never part of `ac_power`: heating here is gas or district heat, so it appears in the model only
+# as a lower bound on the zone temperature. Without it a cooling-only model reports ~12 degC
+# indoors across the seeded March and October windows, which would be a nonsense series for M11 to
+# learn from. Heating as a *dispatchable* load is out of scope for M10 and M11 alike.
+DEFAULT_HEATING_SETPOINT_C = 20.0
+
 # Which rows of the tariff catalogue (dbt/seeds/tariffs.csv) are in force. Only *ids* live here
 # -- the rates themselves live in the catalogue, which dbt seeds and the Python engine reads, so
 # there is exactly one copy of every number. These ids must match the dbt vars of the same name.
@@ -361,6 +389,66 @@ class BatteryConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ThermalConfig:
+    """The conditioned zone and its air conditioner -- M3's battery physics, for heat.
+
+    Read by the M10 synthetic generator to drive a single-zone RC model and a bang-bang
+    thermostat, and (from M11) by the thermal optimiser that will treat the same zone as storage.
+    Sharing one config across both is the discipline that keeps M6's savings comparison honest,
+    applied to the thermal side before there is a second side to disagree with.
+
+    **One zone, one unit, linear.** ``r_k_per_kw`` and ``c_kwh_per_k`` give a free-running time
+    constant ``R*C``; ``solar_gain_kw_per_wm2`` converts GHI directly into a heat gain, collapsing
+    glazing area, orientation and shading into one identifiable number instead of three
+    unidentifiable ones. The AC is modelled as fully on or fully off at ``rated_kw`` electrical,
+    delivering ``rated_kw * cop`` of cooling -- no part-load curve, because a part-load curve is a
+    parameter M11 would have to fit and nothing in M10 could validate.
+
+    ``heating_setpoint_c`` is a **floor, not a load**. The house has non-electric heating, so it
+    bounds the zone temperature from below and contributes nothing to ``ac_power`` or to
+    ``household_load``. Modelling heating as a dispatchable load is out of scope.
+
+    There is deliberately **no initial-temperature knob**: each Berlin day starts the zone at
+    ``setpoint_c``. See the generator docstring for why that is a contract and not a default.
+    """
+
+    r_k_per_kw: float = DEFAULT_THERMAL_R_K_PER_KW
+    c_kwh_per_k: float = DEFAULT_THERMAL_C_KWH_PER_K
+    solar_gain_kw_per_wm2: float = DEFAULT_THERMAL_SOLAR_GAIN_KW_PER_WM2
+    setpoint_c: float = DEFAULT_THERMOSTAT_SETPOINT_C
+    deadband_k: float = DEFAULT_THERMOSTAT_DEADBAND_K
+    heating_setpoint_c: float = DEFAULT_HEATING_SETPOINT_C
+    cop: float = DEFAULT_AC_COP
+    rated_kw: float = DEFAULT_AC_RATED_KW
+
+    @classmethod
+    def from_env(cls) -> ThermalConfig:
+        return cls(
+            r_k_per_kw=_env_float(
+                "ENERGY_THERMAL_R_K_PER_KW", default=str(DEFAULT_THERMAL_R_K_PER_KW)
+            ),
+            c_kwh_per_k=_env_float(
+                "ENERGY_THERMAL_C_KWH_PER_K", default=str(DEFAULT_THERMAL_C_KWH_PER_K)
+            ),
+            solar_gain_kw_per_wm2=_env_float(
+                "ENERGY_THERMAL_SOLAR_GAIN_KW_PER_WM2",
+                default=str(DEFAULT_THERMAL_SOLAR_GAIN_KW_PER_WM2),
+            ),
+            setpoint_c=_env_float(
+                "ENERGY_THERMOSTAT_SETPOINT_C", default=str(DEFAULT_THERMOSTAT_SETPOINT_C)
+            ),
+            deadband_k=_env_float(
+                "ENERGY_THERMOSTAT_DEADBAND_K", default=str(DEFAULT_THERMOSTAT_DEADBAND_K)
+            ),
+            heating_setpoint_c=_env_float(
+                "ENERGY_HEATING_SETPOINT_C", default=str(DEFAULT_HEATING_SETPOINT_C)
+            ),
+            cop=_env_float("ENERGY_AC_COP", default=str(DEFAULT_AC_COP)),
+            rated_kw=_env_float("ENERGY_AC_RATED_KW", default=str(DEFAULT_AC_RATED_KW)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class SyntheticConfig:
     """Parameters of the synthetic telemetry generator.
 
@@ -552,6 +640,54 @@ class HomeAssistantConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class MqttConfig:
+    """The M10 plan publisher's broker settings -- disabled by default.
+
+    Deliberately shaped like :class:`HomeAssistantConfig`, because it carries the same risk from
+    the other direction: that connector is the one place the platform reaches into a real house,
+    and this is the one place it *speaks* to one. Host and credentials come only from the
+    environment, the publisher refuses to run unless ``enabled`` is set with a host present, and
+    nothing it publishes is a command -- see :mod:`energy_platform.publishing.contract`.
+
+    ``retain`` is on by default and is load-bearing rather than a tuning knob: a retained plan is
+    re-read by Home Assistant after a restart without the platform having to be awake, and
+    republishing overwrites the one retained message instead of appending to a stream.
+    """
+
+    enabled: bool = False
+    host: str = ""
+    port: int = 1883
+    username: str = ""
+    password: str = ""
+    tls: bool = False
+    topic_prefix: str = "energy"
+    qos: int = 1
+    retain: bool = True
+    discovery_enabled: bool = True
+    discovery_prefix: str = "homeassistant"
+    client_id: str = "energy-platform-publisher"
+    timeout_seconds: float = 10.0
+
+    @classmethod
+    def from_env(cls) -> MqttConfig:
+        return cls(
+            enabled=_env_bool("ENERGY_MQTT_ENABLED", default="0"),
+            host=_env("ENERGY_MQTT_HOST", default=""),
+            port=_env_int("ENERGY_MQTT_PORT", default="1883"),
+            username=_env("ENERGY_MQTT_USER", default=""),
+            password=_env("ENERGY_MQTT_PASSWORD", default=""),
+            tls=_env_bool("ENERGY_MQTT_TLS", default="0"),
+            topic_prefix=_env("ENERGY_MQTT_TOPIC_PREFIX", default="energy"),
+            qos=_env_int("ENERGY_MQTT_QOS", default="1"),
+            retain=_env_bool("ENERGY_MQTT_RETAIN", default="1"),
+            discovery_enabled=_env_bool("ENERGY_MQTT_DISCOVERY_ENABLED", default="1"),
+            discovery_prefix=_env("ENERGY_MQTT_DISCOVERY_PREFIX", default="homeassistant"),
+            client_id=_env("ENERGY_MQTT_CLIENT_ID", default="energy-platform-publisher"),
+            timeout_seconds=_env_float("ENERGY_MQTT_TIMEOUT_SECONDS", default="10"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class AppConfig:
     """Top-level configuration bundle."""
 
@@ -561,10 +697,12 @@ class AppConfig:
     site: SiteConfig
     pv: PvSystemConfig
     battery: BatteryConfig
+    thermal: ThermalConfig
     synthetic: SyntheticConfig
     forecast: ForecastConfig
     tariffs: TariffConfig
     home_assistant: HomeAssistantConfig
+    mqtt: MqttConfig
 
     @classmethod
     def from_env(cls) -> AppConfig:
@@ -575,8 +713,10 @@ class AppConfig:
             site=SiteConfig.from_env(),
             pv=PvSystemConfig.from_env(),
             battery=BatteryConfig.from_env(),
+            thermal=ThermalConfig.from_env(),
             synthetic=SyntheticConfig.from_env(),
             forecast=ForecastConfig.from_env(),
             tariffs=TariffConfig.from_env(),
             home_assistant=HomeAssistantConfig.from_env(),
+            mqtt=MqttConfig.from_env(),
         )

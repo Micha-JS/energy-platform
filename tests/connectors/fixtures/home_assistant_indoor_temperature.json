@@ -1,0 +1,9 @@
+[
+  [
+    {"entity_id": "sensor.living_room_temperature", "state": "21.4", "last_changed": "2024-06-15T00:00:00+00:00"},
+    {"state": "22.1", "last_changed": "2024-06-15T08:00:00+00:00"},
+    {"state": "24.6", "last_changed": "2024-06-15T12:00:00+00:00"},
+    {"state": "23.8", "last_changed": "2024-06-15T16:00:00+00:00"},
+    {"state": "22.0", "last_changed": "2024-06-15T21:00:00+00:00"}
+  ]
+]

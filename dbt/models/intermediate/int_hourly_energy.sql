@@ -12,6 +12,12 @@ select
 
     t.pv_production_kwh,
     t.household_load_kwh,
+    -- The M10 load split and the zone state. household_load_kwh stays the total every energy
+    -- identity below is written in terms of: ac_power_kwh is a component of it, not a new node
+    -- term, so balance_residual_kwh is deliberately unchanged by their arrival.
+    t.load_base_kwh,
+    t.ac_power_kwh,
+    t.indoor_temp_c,
     t.battery_charge_kwh,
     t.battery_discharge_kwh,
     t.soc_frac,

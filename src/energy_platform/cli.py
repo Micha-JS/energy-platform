@@ -528,6 +528,7 @@ def _build_routes(
             pv=config.pv,
             battery=config.battery,
             synthetic=config.synthetic,
+            thermal=config.thermal,
         )
         for dataset in telemetry:
             routes[dataset] = (synthetic, site_id)

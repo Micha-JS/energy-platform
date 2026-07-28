@@ -102,8 +102,35 @@ models:
         tests:
           - dbt_utils.accepted_range: {min_value: 0, config: {where: "pv_production_kwh is not null"}}
       - name: household_load_kwh
+        description: >
+          Total household consumption, and the canonical one. From M10 it is separable into
+          load_base_kwh + ac_power_kwh, but it is emitted independently rather than derived from
+          them: a total computed as the sum of its parts could not be tested against them, and a
+          house with one consumption meter and no AC sub-meter reports this column alone.
         tests:
           - dbt_utils.accepted_range: {min_value: 0, config: {where: "household_load_kwh is not null"}}
+      - name: load_base_kwh
+        description: >
+          Consumption excluding the air conditioner. NULL wherever the producer cannot separate
+          the two -- never back-derived by subtraction, which would fabricate a split from a meter
+          that never measured one. See assert_load_split_identity.
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "load_base_kwh is not null"}}
+      - name: ac_power_kwh
+        description: >
+          Electrical energy drawn by the air conditioner. Real mode requires a separately metered
+          source (the HVAC integration's own power sensor, or an external meter); where none is
+          configured this is NULL, never estimated and never assumed zero.
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "ac_power_kwh is not null"}}
+      - name: indoor_temp_c
+        description: >
+          Zone air temperature at the end of the hour, degrees Celsius. A state, not a flow, so it
+          takes no part in the energy identities -- ranged like the outdoor temperature it is
+          driven by rather than floored at zero, since a habitable-range check here would encode
+          an assumption about the house rather than about the data.
+        tests:
+          - dbt_utils.accepted_range: {min_value: -40, max_value: 50, config: {where: "indoor_temp_c is not null"}}
       - name: battery_charge_kwh
         tests:
           - dbt_utils.accepted_range: {min_value: 0, config: {where: "battery_charge_kwh is not null"}}

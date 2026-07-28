@@ -55,7 +55,7 @@ def _load_fixture(name: str) -> Any:
 
 def test_power_integrates_to_hourly_kwh_from_fixture() -> None:
     client = _client(
-        _load_fixture("home_assistant_pv_power.json"),
+        _load_fixture("home_assistant_pv_production.json"),
         {Dataset.PV_PRODUCTION: "sensor.pv_power"},
     )
     raw = client.fetch_window(Dataset.PV_PRODUCTION, "home", Resolution.HOUR, WINDOW)
@@ -87,6 +87,55 @@ def test_soc_is_sampled_as_a_fraction() -> None:
     raw = client.fetch_window(Dataset.SOC, "home", Resolution.HOUR, WINDOW)
     # End of the 11:00-12:00Z hour is 12:00Z; the 55% sample is in effect -> 0.55.
     assert dict(raw.points)[_ts("2024-06-15T11:00:00")] == pytest.approx(0.55)
+
+
+def test_indoor_temperature_is_sampled_in_its_own_units_from_fixture() -> None:
+    """The M10 channel that must NOT go through SoC's percent conversion.
+
+    A temperature quietly divided by 100 would still be a smooth, plausible-looking line -- it is
+    the kind of bug that survives a chart review and only surfaces when M11's optimiser starts
+    reasoning about a house apparently held at a quarter of a degree.
+    """
+    client = _client(
+        _load_fixture("home_assistant_indoor_temperature.json"),
+        {Dataset.INDOOR_TEMPERATURE: "sensor.living_room_temperature"},
+    )
+    raw = client.fetch_window(Dataset.INDOOR_TEMPERATURE, "home", Resolution.HOUR, WINDOW)
+    by_ts = dict(raw.points)
+
+    # End of the 11:00-12:00Z hour is 12:00Z, when the 24.6 sample takes effect. Degrees, as read.
+    assert by_ts[_ts("2024-06-15T11:00:00")] == pytest.approx(24.6)
+    assert by_ts[_ts("2024-06-15T03:00:00")] == pytest.approx(21.4)  # overnight, carried forward
+
+
+def test_ac_power_integrates_like_any_other_power_sensor() -> None:
+    # AC power needs no new conversion: it is a watt sensor like the six energy flows, so it rides
+    # the existing integration path. 2000 W held across the hour -> 2.0 kWh.
+    payload = [
+        [
+            {"state": "0", "last_changed": "2024-06-15T00:00:00+00:00"},
+            {"state": "2000", "last_changed": "2024-06-15T12:00:00+00:00"},
+            {"state": "0", "last_changed": "2024-06-15T13:00:00+00:00"},
+        ]
+    ]
+    client = _client(payload, {Dataset.AC_POWER: "sensor.ac_power"})
+    raw = client.fetch_window(Dataset.AC_POWER, "home", Resolution.HOUR, WINDOW)
+    by_ts = dict(raw.points)
+    assert by_ts[_ts("2024-06-15T12:00:00")] == pytest.approx(2.0)
+    assert by_ts[_ts("2024-06-15T14:00:00")] == pytest.approx(0.0)
+
+
+def test_an_unmetered_air_conditioner_refuses_rather_than_estimating() -> None:
+    """A house with no AC sub-meter reports nothing for the channel -- it never infers one.
+
+    This is the real-mode half of the load-split contract. The inverter meters the house, not the
+    appliance, so `household_load - something` is the tempting and wrong answer: it would fabricate
+    a split from a number that never measured one, and the warehouse's identity test would then be
+    checking arithmetic against itself.
+    """
+    client = _client({}, {Dataset.HOUSEHOLD_LOAD: "sensor.house_power"})
+    with pytest.raises(HomeAssistantError, match="ENERGY_HA_ENTITY_MAP"):
+        client.fetch_window(Dataset.AC_POWER, "home", Resolution.HOUR, WINDOW)
 
 
 def test_unavailable_state_yields_null_not_zero() -> None:
