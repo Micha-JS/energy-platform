@@ -7,6 +7,13 @@ ever asserting on PNG bytes -- which differ across font stacks and matplotlib ve
 make the check about rendering rather than about the result. Same "value-stable, not
 hash-guaranteed" line the derived zone already draws.
 
+**The check is scoped to what actually reproduces**, and that is not everything it plots. Three
+quantities carry a known, bounded machine dependence -- the fitted forecasts behind
+`forecast_driven`, and the non-unique daily split of an optimal schedule under a flat tariff -- so
+they are compared at a stated tolerance rather than at the settlement quantum. The constants below
+name each cause and the measurement it was sized from. Asserting all of it exactly is what the
+first version did, and it can only ever pass on the machine that generated the sidecar.
+
 **Why the chart plots differences and not costs.** Over the seeded span all four scenarios cost
 about the same -- around EUR -145 -- because they are the same house under the same tariff, and
 dispatch moves a fraction of a euro of it. Four bars at that scale are four identical bars. So the
@@ -52,9 +59,34 @@ INK_MUTED = "#898781"
 GRIDLINE = "#e1e0d9"
 BASELINE = "#c3c2b7"
 
-# Money differences are reported to the cent in prose but compared here at the settlement quantum,
-# so the check fails on a real change in dispatch and not on a rounding step.
+# WHAT THE CHECK MAY LET THROUGH, AND WHY IT IS NOT ONE NUMBER.
+#
+# Two kinds of quantity sit in the sidecar and only one of them is machine-independent. Everything
+# derived from the *actuals* -- naive dispatch, the hindsight optimum, the perfect-foresight
+# reference and the myopia term between them -- is a function of the warehouse alone and reproduces
+# to the settlement quantum anywhere. Held to that, the check fails on a real change in dispatch and
+# not on a rounding step.
 _TOLERANCE_EUR = 1e-6
+
+# `forecast_driven` is the exception: it comes out of M7's gradient-boosted fits, and a fit is only
+# bit-reproducible on a machine with the same thread count, library build and CPU --
+# `dispatch.forward_store` makes exactly that disclaimer about the schedules themselves. Holding it
+# to 1e-6 makes this check pass only on the machine that generated the sidecar, which is not a
+# check; the first CI run of it failed for precisely that reason. Three times the largest drift
+# measured between the arm64 machine that owns the figure and CI's x86_64 runner (7.6 ct on a
+# EUR 145 total, ~5e-4 relative), and still far below anything that would move the conclusion.
+_FIT_TOLERANCE_EUR = 0.25
+
+# A different cause needing a different number: under a *flat* tariff the optimal schedule is not
+# unique -- `test_a_flat_price_gives_the_optimiser_nothing_to_beat_naive_with` documents the tie --
+# so HiGHS may split the same total across days differently on another build. The window total is
+# unaffected and stays exact; only the daily curve moves. Measured at 13 ct, taken at four times it.
+_TIE_BREAK_TOLERANCE_EUR = 0.50
+
+# The window columns that inherit the fit drift. `regret_eur` and `forecast_error_cost_eur` are
+# `forecast_driven_cost_eur` minus a quantity that *is* exact, so they move by the identical
+# absolute amount and take the identical tolerance -- which the CI run confirmed to six decimals.
+_FIT_DERIVED_EUR = frozenset({"forecast_driven_cost_eur", "regret_eur", "forecast_error_cost_eur"})
 
 _SERIES = (
     ("forecast_driven", "Forecast-driven (executed)", COLOUR_FORECAST_DRIVEN),
@@ -174,11 +206,41 @@ def _diff(committed: dict[str, Any], current: dict[str, Any]) -> list[str]:
             for key, value in after.items():
                 was = before.get(key)
                 if isinstance(value, float) and isinstance(was, int | float):
-                    if not math.isclose(value, was, abs_tol=_TOLERANCE_EUR):
-                        problems.append(f"{section}[{index}].{key}: {was} -> {value}")
+                    tolerance = _tolerance(section, key, after)
+                    if not math.isclose(value, was, abs_tol=tolerance):
+                        problems.append(
+                            f"{section}[{index}].{key}: {was} -> {value} (tolerance {tolerance:g})"
+                        )
                 elif was != value:
                     problems.append(f"{section}[{index}].{key}: {was!r} -> {value!r}")
     return problems
+
+
+def _tolerance(section: str, key: str, row: dict[str, Any]) -> float:
+    """How far one number may move and still be the same result -- see the constants above.
+
+    Everything not named here is actual-derived and exact. The three that are named are named
+    because their *cause* of drift is known and bounded, not because they matter less: a stale
+    forecast still fails, it just has to be stale by more than a rebuild on another CPU.
+    """
+    if section == "daily":
+        if key != "cumulative_net_cost_eur":
+            return _TOLERANCE_EUR
+        scenario = row["scenario"]
+        if scenario == "forecast_driven":
+            return _FIT_TOLERANCE_EUR
+        if scenario in ("optimal", "perfect_foresight_plan"):
+            return _TIE_BREAK_TOLERANCE_EUR
+        # naive_continuous: a reactive policy replayed over the actuals. No solver, no fit.
+        return _TOLERANCE_EUR
+    if key in _FIT_DERIVED_EUR:
+        return _FIT_TOLERANCE_EUR
+    if key == "captured_value_share":
+        # regret over available savings, so the euro tolerance divides through by the prize -- and
+        # on this window the prize is 29 cents, which amplifies the same drift by three and a half.
+        prize = row.get("available_savings_eur")
+        return _FIT_TOLERANCE_EUR / abs(prize) if prize else _TOLERANCE_EUR
+    return _TOLERANCE_EUR
 
 
 def _render(payload: dict[str, Any]) -> None:
