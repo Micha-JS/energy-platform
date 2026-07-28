@@ -17,6 +17,10 @@ services:
       POSTGRES_DB: dagster
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Creates the dashboard's read-only role on a fresh volume, before dbt has built anything.
+      # The file is idempotent and grants both existing and future tables, so `just
+      # dashboard-grants` can apply the same script later against an already-built warehouse.
+      - ./dashboard/sql/grant_read_only.sql:/docker-entrypoint-initdb.d/10-dashboard-ro.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dagster -d dagster"]
       interval: 5s
@@ -61,6 +65,35 @@ services:
     depends_on:
       dagster_init:
         condition: service_completed_successfully
+
+  # M9's presentation layer. Depends only on Postgres -- it reads marts and nothing else, so it
+  # has no reason to wait for Dagster, and it renders a designed "no data yet" state rather than
+  # failing when the warehouse has not been built. That is the state a fresh `just demo` opens in.
+  dashboard:
+    build:
+      context: .
+      target: dashboard
+    command:
+      - streamlit
+      - run
+      - dashboard/app.py
+      - --server.port=8501
+      - --server.address=0.0.0.0
+      # Headless, or Streamlit blocks on an email prompt on first run inside the container.
+      - --server.headless=true
+      - --browser.gatherUsageStats=false
+    environment:
+      <<: *dagster-env
+      # Connects as the read-only role, not as dagster: it can SELECT from analytics_marts and
+      # nothing else. See dashboard/sql/grant_read_only.sql for why that is a role and not a
+      # convention.
+      ENERGY_DASHBOARD_PG_USER: dashboard_ro
+      ENERGY_DASHBOARD_PG_PASSWORD: dashboard_ro
+    ports:
+      - "8501:8501"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   pgdata:

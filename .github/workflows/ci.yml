@@ -34,15 +34,29 @@ jobs:
       - name: Install Python 3.12
         run: uv python install 3.12
       - name: Install (frozen)
-        run: uv sync --frozen
+        # --extra dashboard so the M9 Streamlit app is type-checked and its AppTest suite runs
+        # here. That suite's most important member -- every page degrading gracefully against an
+        # EMPTY warehouse -- needs no marts at all, so this is the job that must run it: the dbt
+        # job below has data, and a graceful-no-data test that only ever sees data proves nothing.
+        run: uv sync --frozen --extra dashboard
       - name: Ruff lint
         run: uv run ruff check --output-format=github .
       - name: Ruff format check
         run: uv run ruff format --check .
       - name: mypy (strict)
-        run: uv run mypy src tests
+        run: uv run --extra dashboard mypy src tests dashboard
+      - name: Create the dashboard's read-only role
+        # So the empty-warehouse tests connect as dashboard_ro, exactly as the app does. Without
+        # it they would fall back to testing the unreachable-database branch instead -- graceful
+        # either way, but not the branch being asserted.
+        run: |
+          PGPASSWORD=dagster psql -h localhost -U dagster -d dagster \
+            -v ON_ERROR_STOP=1 -f dashboard/sql/grant_read_only.sql
       - name: pytest
-        run: uv run pytest
+        # --extra on every invocation, not just the sync: `uv run` re-syncs the environment to the
+        # options it is given, so a bare `uv run` here would uninstall Streamlit before the
+        # dashboard tests could use it.
+        run: uv run --extra dashboard pytest
         env:
           # Fail (don't skip) the raw-zone tests if this service Postgres is unreachable --
           # the whole point of the container is that those tests actually run in CI.
@@ -173,6 +187,24 @@ jobs:
         env:
           ENERGY_REQUIRE_POSTGRES: "1"
           ENERGY_REQUIRE_DBT: "1"
+      - name: Grant the dashboard's read-only role
+        # After the build, so `grant select on all tables` picks up every mart that now exists.
+        # The same file compose runs on a fresh volume, where the default-privileges half is what
+        # does the work instead -- it is written to be correct from either direction.
+        run: |
+          PGPASSWORD=dagster psql -h localhost -U dagster -d dagster \
+            -v ON_ERROR_STOP=1 -f dashboard/sql/grant_read_only.sql
+      - name: Dashboard smoke tests against the built warehouse
+        # The seeded half of tests/dashboard: every page renders, the banner reports the data mode
+        # the warehouse actually holds, and every column the app selects exists. These skip in
+        # `quality` for want of marts, so ENERGY_REQUIRE_DBT makes the skip a failure here -- a
+        # smoke test that silently did not run is indistinguishable from one that passed.
+        run: uv run --extra dashboard pytest tests/dashboard
+        env:
+          ENERGY_REQUIRE_POSTGRES: "1"
+          ENERGY_REQUIRE_DBT: "1"
+          ENERGY_DASHBOARD_PG_USER: dashboard_ro
+          ENERGY_DASHBOARD_PG_PASSWORD: dashboard_ro
       - name: dbt docs generate
         run: uv run --project dbt dbt docs generate --project-dir dbt --profiles-dir dbt
       - name: Upload docs as Pages artifact

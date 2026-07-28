@@ -23,9 +23,6 @@ select
     {{ berlin_calendar('o.ts_utc') }}
 from {{ source('raw', 'observations_current') }} o
 join {{ source('raw', 'ingestion') }} i on i.id = o.ingestion_id
-where o.dataset in (
-        'pv_production', 'household_load', 'battery_charge', 'battery_discharge',
-        'soc', 'grid_import', 'grid_export'
-    )
+where o.dataset in ({{ telemetry_datasets() }})
     and o.resolution = 'hour'
 group by i.source, o.ts_utc, o.region

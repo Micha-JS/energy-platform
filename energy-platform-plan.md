@@ -100,10 +100,27 @@ energy-platform/
   than a failure: a perfect-forecast day-ahead planner captures only 6.7%, so the value is
   structurally out of reach of a daily horizon, not lost to model error.
 
-### M9 — Dashboard + README polish
-- Streamlit pages: live overview, economics, optimizer comparison, forecast quality
-- README: architecture diagram, headline numbers, design-decisions section ("why append-only", "why no lookahead"), 60-second demo instructions
+### M9 — Dashboard + README polish ✅
+- Streamlit pages: overview, economics, dispatch comparison, forecast quality — a **pure
+  presentation layer**, wired into docker-compose and reading the warehouse through a read-only role
+- README: architecture diagram, headline numbers, design-decisions section ("why append-only", "why
+  no lookahead"), 60-second demo instructions
 - **Done when:** a stranger can `just demo` and see everything within one minute.
+- **Landed:** four pages in `dashboard/`, on :8501, organised around the **mart-only rule** — every
+  number on screen is a mart column and the app computes nothing. Enforced three ways (a
+  `dashboard_ro` role that can read the marts schema and nothing else, an AST guard confining SQL to
+  one module, and a per-column contract checked against the built warehouse), each with a positive
+  control. The rule did real work rather than describing existing behaviour: it forced two mart
+  changes — `mart_coverage_monthly`, because the monthly coverage grain did not exist, and
+  `mart_dispatch_regret.attainable_savings_eur`, which the mart had been computing inside a ratio
+  and never exposing.
+- **Scoped honestly, and the done-when was split rather than fudged.** `just demo` boots to a
+  serving dashboard in ~8s on built images (a few minutes on a fresh clone, all of it one
+  `docker build`), and it does not load data — seeding plus `just warehouse` is minutes of dbt,
+  model fits and MILP. So the dashboard opens in a designed empty state naming the next two
+  commands, and the README publishes the three timings separately instead of averaging them into a
+  claim that would be false in both directions. That empty path is tested on every push, because it
+  is the first thing that happens to a stranger's clone.
 
 ---
 

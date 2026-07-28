@@ -48,6 +48,27 @@ dependencies = [
     "threadpoolctl>=3.5,<4",
 ]
 
+[project.optional-dependencies]
+# M9's dashboard. An EXTRA rather than a runtime dependency: the Dagster webserver, the daemon and
+# every CLI invocation would otherwise carry Streamlit's tail for a page they never render, which
+# is the same "pure weight in the container" argument the matplotlib note below makes. The
+# Dockerfile installs it in one stage only; `uv sync --extra dashboard` gets it locally.
+#
+# The boundary is enforced, not intended: tests/test_import_containment.py fails if anything under
+# src/energy_platform imports streamlit, altair or pandas, so the app has to stay in dashboard/ --
+# exactly as report_regret.py has to stay in scripts/.
+dashboard = [
+    "streamlit>=1.40,<2",
+    # Altair and pandas both already arrive inside Streamlit, so naming them adds no wheel. They
+    # are declared anyway because the dashboard imports them directly, and depending on another
+    # package's transitive closure is how a minor bump elsewhere breaks a chart here. Altair is
+    # chosen over adding plotly for the same reason it is free: it is already installed, and it
+    # gives the encoding control (colour bound to a scenario key, a role set apart without
+    # implying a rank, a diverging axis) that st.line_chart does not.
+    "altair>=5.4,<6",
+    "pandas>=2.2,<3",
+]
+
 [project.scripts]
 energy-platform = "energy_platform.cli:main"
 
@@ -77,19 +98,19 @@ packages = ["src/energy_platform"]
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["src", "tests"]
+src = ["src", "tests", "dashboard"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "TID", "RUF"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["energy_platform"]
+known-first-party = ["energy_platform", "dashboard"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 mypy_path = "src"
-packages = ["energy_platform", "tests"]
+packages = ["energy_platform", "tests", "dashboard"]
 namespace_packages = true
 explicit_package_bases = true
 warn_unreachable = true
@@ -112,6 +133,15 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["pvlib.*", "sklearn.*", "pandas.*", "joblib.*", "threadpoolctl.*"]
 ignore_missing_imports = true
+
+# Altair's builder API is typed as returning Any from every chained call -- `.encode()`,
+# `.properties()`, `+` -- so a function that honestly returns a chart trips no-any-return on its
+# last line. Confined to the one module whose entire job is building charts, which is the same
+# containment PuLP and scikit-learn get above: the untyped surface lives in one place and hands
+# typed values to everything else. The rest of dashboard/ stays strict.
+[[tool.mypy.overrides]]
+module = ["dashboard.charts"]
+disable_error_code = ["no-any-return"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
