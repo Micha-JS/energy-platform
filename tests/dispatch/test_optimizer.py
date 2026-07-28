@@ -25,7 +25,12 @@ from energy_platform.dispatch.optimizer import (
     _configured_solver,
     solve_window,
 )
-from energy_platform.dispatch.pricing import WindowPrices, terminal_value_eur_kwh, window_prices
+from energy_platform.dispatch.pricing import (
+    WindowPrices,
+    planning_continuation_eur_kwh,
+    terminal_value_eur_kwh,
+    window_prices,
+)
 from energy_platform.tariffs.catalog import TariffSpec
 from tests.dispatch.conftest import BARE_DYNAMIC, FEED_IN, LOSSLESS, ZERO_FEED_IN, make_hours
 
@@ -98,6 +103,32 @@ def test_a_flat_price_gives_the_optimiser_nothing_to_beat_naive_with() -> None:
     naive = baselines.naive_continuous(hours, prices, LOSSLESS, terminal)
 
     assert optimal.objective_eur == pytest.approx(naive.objective_eur, abs=1e-6)
+
+
+def test_the_planning_continuation_value_is_bounded_by_the_median_not_the_minimum() -> None:
+    """The two rates bound different things, and swapping them is a EUR 16.8 mistake.
+
+    ``terminal_value_eur_kwh`` credits energy at the end of a window that will never be seen again,
+    so the cheapest hour that window offered is the only rate that cannot overpay.
+    ``planning_continuation_eur_kwh`` credits energy that is *going to be used tomorrow*, and the
+    cheapest hour of a sixty-day window is not an estimate of tomorrow's price. This pins the
+    difference, because the docstring alone did not stop it being read the other way round.
+
+    Import prices here are 5, 32, 32 and 50 ct/kWh against a 8.11 ct/kWh feed-in on a lossless
+    battery, so the sell floor is 8.11 ct and the cheapest hour sits *below* it -- the shape
+    `dynamic_2024` really has (6.72 ct minimum against a 9.01 ct floor). Clamping to the minimum
+    would invert the band and drop the planner onto the sell floor, which is exactly the cliff
+    where it exports the battery every evening.
+    """
+    prices, _ = _window([50.0, 320.0, 320.0, 500.0], [0.0] * 4, [0.0] * 4)
+    cheapest, median, sell_floor = 0.05, 0.32, prices.feed_in_eur_kwh
+
+    continuation = planning_continuation_eur_kwh(prices, LOSSLESS)
+
+    assert continuation == pytest.approx((sell_floor + median) / 2.0)
+    assert continuation > cheapest, "the minimum import price is not this function's upper bound"
+    assert continuation > sell_floor, "landing on the sell floor is the cliff, not the band"
+    assert terminal_value_eur_kwh(prices) == pytest.approx(cheapest), "M6's rule is unchanged"
 
 
 def test_self_consumption_beats_export_when_the_import_price_exceeds_the_feed_in_rate() -> None:

@@ -70,7 +70,7 @@ sources:
           exists -- a gap is never scored as a zero.
       - name: forward_dispatch_runs
         description: >
-          M8's three-way comparison, one row per (region, window, tariff, scenario) over the
+          M8's four-way comparison, one row per (region, window, tariff, scenario) over the
           SIMULATED SPAN -- which is generally shorter than the declared window, because the
           forecast models need warm-up before anything can be planned, and is therefore recorded
           as its own sim_start/sim_end rather than inferred from the window.

@@ -48,12 +48,20 @@ from energy_platform.forecasting.vintage import SELECTION_RULE_ID
 # The tariff a not-simulated marker is filed under. A window nothing could be simulated for has no
 # per-tariff result to report -- the reason is about the models, not the money, so it is the same
 # for every tariff -- and one row says it once rather than N rows saying it N times.
+#
+# It is a value in the same column as the real tariff ids, so the two write paths overlap in the
+# key space and each has to clear the other's rows -- see `replace_window`. They are not two
+# independent partitions of the table; they are two mutually exclusive claims about one window.
 ALL_TARIFFS: Final = "*"
 
-# What `plan_status` says for a scenario that was never planned. The two reference scenarios are
-# costed per day so the daily chart can compare three cumulative curves, but neither was decided at
-# a decision time, and writing the scenario name into this column would make it a second, redundant
-# copy of `scenario` rather than an honest "this question does not apply".
+# What `plan_status` says for a scenario whose per-day decision this table does not carry. Three
+# scenarios take it, for two different reasons: naive_continuous and optimal were never planned at
+# all, being solved once over the whole span, while perfect_foresight_plan *is* rolled day by day
+# but is a decomposition instrument rather than a deliverable, so `forward.simulate` keeps only its
+# settlement and discards its day outcomes. All three are still costed per day, because the README
+# figure needs all four cumulative curves to plot three differences against naive. Writing the
+# scenario name into this column instead would make it a second, redundant copy of `scenario`
+# rather than an honest "does not apply".
 PLAN_STATUS_NOT_PLANNED: Final = "not_planned"
 
 
@@ -191,8 +199,8 @@ def _ddl(schema: str) -> list[sql.Composed]:
                 energy_cost_eur       double precision,
                 feed_in_revenue_eur   double precision,
                 is_priced             boolean     NOT NULL,
-                -- Null for the two reference scenarios, which were never planned: only
-                -- forecast_driven has a plan to have departed from.
+                -- Null for the three reference scenarios: only forecast_driven's plan is
+                -- recorded, so only it has a plan to have departed from.
                 planned_battery_charge_kwh    double precision,
                 planned_battery_discharge_kwh double precision,
                 was_clipped           boolean
@@ -246,16 +254,28 @@ class ForwardDispatchRepository:
         supersedes the whole comparison rather than leaving one scenario from an older simulation
         beside two from a newer one. A :class:`NotSimulated` window writes a single marker row and
         no schedule -- present and explained, rather than absent and unexplained.
+
+        **The delete also takes out the marker**, and the marker path takes out every tariff's
+        rows. A window can move between the two states in either direction -- ``just
+        forecast-reset`` or a higher ``min_train_days`` makes a simulated window unsimulable, and
+        the models warming up does the reverse -- and a delete scoped to its own ``tariff_id``
+        would leave the losing side's rows in place. The mart would then report a previous run's
+        costs as current beside a marker saying nothing was simulated, and every coverage
+        assertion downstream would pass, because none of them can see that a row is stale.
         """
         if isinstance(solution, NotSimulated):
             return self._replace_not_simulated(solution, battery, training_data_source)
 
         digest = _input_digest(solution, battery)
         params = _battery_json(battery)
-        key = (solution.region, solution.window.start, solution.window.end, solution.tariff_id)
 
         with self._conn.transaction(), self._conn.cursor() as cur:
-            replaced = self._delete(cur, key)
+            replaced = self._delete(
+                cur,
+                solution.region,
+                solution.window,
+                (solution.tariff_id, ALL_TARIFFS),
+            )
             days_written = hours_written = 0
             for result in solution.results:
                 run_id = self._insert_run(
@@ -279,15 +299,17 @@ class ForwardDispatchRepository:
     ) -> ForwardWriteCounts:
         """Record that a declared window produced nothing, and why.
 
-        Written under :attr:`Scenario.FORECAST_DRIVEN` alone. The other two *could* be computed here
-        -- M6 already reports them over the full window -- but they would be over a different span
-        than any simulated row, and a mart that mixed the two grains under one set of column names
-        would be the single most misleading thing this milestone could ship.
+        Written under :attr:`Scenario.FORECAST_DRIVEN` alone. The other three *could* be computed
+        here -- M6 already reports two of them over the full window -- but they would be over a
+        different span than any simulated row, and a mart that mixed the two grains under one set
+        of column names would be the single most misleading thing this milestone could ship.
+
+        The delete is scoped to the window and **not** to a tariff. "Nothing could be simulated" is
+        a claim about the models, so it is a claim about every tariff at once, and any per-tariff
+        rows a previous run left behind are now false rather than merely old.
         """
         with self._conn.transaction(), self._conn.cursor() as cur:
-            replaced = self._delete(
-                cur, (marker.region, marker.window.start, marker.window.end, ALL_TARIFFS)
-            )
+            replaced = self._delete(cur, marker.region, marker.window, None)
             cur.execute(
                 sql.SQL(
                     """
@@ -318,16 +340,29 @@ class ForwardDispatchRepository:
         return ForwardWriteCounts(runs=1, days=0, hours=0, replaced=replaced)
 
     def _delete(
-        self, cur: psycopg.Cursor[tuple[object, ...]], key: tuple[str, date, date, str]
+        self,
+        cur: psycopg.Cursor[tuple[object, ...]],
+        region: str,
+        window: CoverageWindow,
+        tariff_ids: Sequence[str] | None,
     ) -> int:
+        """Drop a window's runs, and by cascade its days and schedule.
+
+        ``tariff_ids`` of ``None`` means every tariff filed against this window, marker included.
+        """
+        scope = sql.SQL("")
+        params: list[object] = [region, window.start, window.end]
+        if tariff_ids is not None:
+            scope = sql.SQL(" AND tariff_id = ANY(%s)")
+            params.append(list(tariff_ids))
         cur.execute(
             sql.SQL(
                 """
                 DELETE FROM {schema}.forward_dispatch_runs
-                WHERE region = %s AND window_start = %s AND window_end = %s AND tariff_id = %s
+                WHERE region = %s AND window_start = %s AND window_end = %s{scope}
                 """
-            ).format(schema=sql.Identifier(self._derived)),
-            key,
+            ).format(schema=sql.Identifier(self._derived), scope=scope),
+            params,
         )
         return cur.rowcount if cur.rowcount > 0 else 0
 
@@ -337,9 +372,12 @@ class ForwardDispatchRepository:
         Needed because a window can stop being simulable -- the models it depended on may no longer
         fit after a config change -- and a stale set of rows claiming otherwise is worse than none.
         The forecasting store carries the same capability for the same reason.
+
+        Scoped to the one tariff named, and to the marker that would contradict it: dropping a
+        window's ``dynamic_2024`` rows must not silently take ``static_2024``'s with them.
         """
         with self._conn.transaction(), self._conn.cursor() as cur:
-            return self._delete(cur, (region, window.start, window.end, tariff_id))
+            return self._delete(cur, region, window, (tariff_id, ALL_TARIFFS))
 
     def _insert_run(
         self,
@@ -433,11 +471,12 @@ class ForwardDispatchRepository:
     ) -> int:
         """Per-day costing for every scenario, and the SoC chain for the executed one.
 
-        The two reference scenarios are costed per day as well, from the same settled hours, because
-        the daily chart the README ships compares three cumulative curves and a mart that only held
-        one of them would push that arithmetic into the plotting script. Their SoC and plan columns
-        come from their own trajectories -- there is no plan, so ``plan_status`` records what the
-        scenario is rather than pretending it was decided.
+        The three reference scenarios are costed per day as well, from the same settled hours,
+        because the README figure plots three cumulative differences against naive and needs all
+        four curves to do it -- a mart that held only one would push that arithmetic into the
+        plotting script. None of the three carries a per-day plan here: two were never planned, and
+        the third's day outcomes are not kept, so ``plan_status`` says so rather than pretending the
+        day was decided.
         """
         by_date = _hours_by_date(result.hours)
         outcomes = {day.local_date: day for day in solution.days}

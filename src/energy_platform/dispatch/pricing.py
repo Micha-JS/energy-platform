@@ -155,15 +155,28 @@ def planning_continuation_eur_kwh(
     over sixty days at 8.11 ct and nothing at all at 10 ct. The cliff sits exactly where the
     arithmetic says it does.
 
-    **The upper bound is M6's hoarding argument**, unchanged: credit the energy above what it costs
-    to acquire and the planner buys purely to be paid for holding.
+    **The upper bound is M6's hoarding argument, restated at the price the energy will be used at.**
+    Credit a stored kWh above what it is worth when it comes out and the planner buys purely to be
+    paid for holding. The bound is therefore the **median** import price, and deliberately not the
+    minimum :func:`terminal_value_eur_kwh` takes. The two functions are bounding different things:
+    M6 credits energy at the end of a window it will never see again, so the cheapest hour the
+    window offered is the only rate it can be sure never overpays. A rolling planner's energy is
+    *going to be used*, tomorrow, at whatever tomorrow costs -- and the cheapest hour of a
+    sixty-day window is not an estimate of that.
+
+    Taking the minimum here was tried, and it is worse than wrong in theory. Under ``dynamic_2024``
+    the cheapest non-negative retail hour is 6.72 ct/kWh -- **below** the 9.01 ct sell floor, so the
+    band inverts, the lower bound wins, and the continuation value lands exactly on the cliff edge
+    above. Measured over the seeded window that turns a dynamic-tariff regret of EUR 3.13 into EUR
+    19.97. The upper bound has to be a rate the energy might plausibly be used at, or it stops
+    being a bound and becomes a floor.
 
     Between the two the result is flat -- measured across 10..34 ct/kWh on the seeded window, the
     perfect-foresight controller's cost moves by EUR 0.00 under the static tariff and EUR 0.27 under
     the dynamic one. So the choice inside the band does not need to be clever, it needs to be
     *inside*: the midpoint between the sell floor and the median import price is taken, which is
     derived from the tariff and the battery with no free constant, and sits mid-plateau for both
-    tariffs in the catalogue.
+    tariffs in the catalogue -- 20.68 ct under the dynamic one and 22.00 ct under the static.
 
     None of this touches settlement. Every scenario is still settled once, over the whole span, at
     :func:`terminal_value_eur_kwh` -- this value only ever shapes what the planner *decides*, which
@@ -185,6 +198,9 @@ def planning_continuation_eur_kwh(
     if not priced:
         return sell_floor
     median = priced[len(priced) // 2]
+    # Bounded below by the sell floor and above by the median, and NOT by `min(priced)` -- see the
+    # docstring. Clamping to the minimum was tried and measured: it costs EUR 16.8 over the seeded
+    # window, because under `dynamic_2024` the minimum is *below* the sell floor.
     return max(sell_floor, (sell_floor + median) / 2.0)
 
 
