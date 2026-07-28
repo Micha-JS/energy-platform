@@ -76,6 +76,25 @@ optimum, over 60 rolling days of the synthetic demo data](docs/img/regret_three_
   marts through a read-only role and computes nothing, and the scientific and plotting stacks are
   fenced out of `src/` (see [Dashboard (M9)](#dashboard-m9)).
 
+The same pipeline as the two tools actually render it — both taken from a stack booted with
+`just demo` and seeded with `just dbt-seed && just warehouse`:
+
+![Dagster's global asset lineage: four asset groups — market_data, weather, telemetry and
+forecasting — with the weather → telemetry dependency the synthetic generator
+needs](docs/img/dagster_asset_graph.png)
+
+*Dagster: ingestion and derivation as partitioned assets. `weather → telemetry` is the edge that
+matters — the synthetic generator builds PV from irradiance, so telemetry cannot be materialised
+before the weather it is derived from.*
+
+![The dbt lineage graph: raw and derived sources feeding staging, then intermediate, then the nine
+marts](docs/img/dbt_dag.png)
+
+*dbt: sources (green) → staging → intermediate → marts. The `derived.*` sources on the left are
+written by the Python steps and read back, which is why the optimizer and the backtester sit
+between two dbt invocations — see `just warehouse`. Tests and unit tests are filtered out of this
+view; there are considerably more nodes than models.*
+
 ## Market data (M1)
 
 The SMARD connector fetches the German day-ahead wholesale price and grid load. No API key
