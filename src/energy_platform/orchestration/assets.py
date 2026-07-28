@@ -479,3 +479,87 @@ def forecast_backtest_derived(
 
 
 forecasting_assets = [forecast_backtest_derived]
+
+
+# -- Publishing (M10) --------------------------------------------------------------------
+
+
+@asset(
+    name="published_plan",
+    description=(
+        "Publish today's forward dispatch plan to MQTT as a retained RECOMMENDATION -- never a "
+        "command; this code location has no write path to an inverter. Unpartitioned, because it "
+        "publishes the current plan rather than accruing history: the broker holds one retained "
+        "message per topic and derived.plan_publications holds the audit trail. Disabled by "
+        "default and scheduled STOPPED: it runs only where ENERGY_MQTT_* is configured. Reads "
+        "derived.forward_dispatch_schedule, so `just warehouse` must have run."
+    ),
+    group_name="publishing",
+    kinds={"python", "postgres"},
+)
+def published_plan(context: AssetExecutionContext) -> MaterializeResult:
+    # Imported inside the asset, like the backtest above: this pulls an MQTT stack the rest of the
+    # code location never uses, and the location loads on every Dagster process start.
+    import psycopg
+
+    from energy_platform.publishing.client import MqttPublishError, connect
+    from energy_platform.publishing.publisher import publish_plan
+    from energy_platform.publishing.reader import ForwardPlanReader, PlanNotAvailableError
+    from energy_platform.publishing.store import PublicationRepository
+
+    config = AppConfig.from_env()
+    site_id = config.site.default_id
+    tariff_id = config.tariffs.consumption_tariff_id
+    day = datetime.now(ZoneInfo(PARTITION_TIMEZONE)).date()
+
+    try:
+        with psycopg.connect(config.postgres.dsn) as conn:
+            reader = ForwardPlanReader(conn, derived_schema=config.postgres.derived_schema)
+            ledger = PublicationRepository(conn, derived_schema=config.postgres.derived_schema)
+            ledger.ensure_schema()
+            with connect(config.mqtt) as publisher:
+                outcome = publish_plan(
+                    reader,
+                    publisher,
+                    ledger,
+                    site_id=site_id,
+                    day=day,
+                    tariff_id=tariff_id,
+                    now=datetime.now(UTC),
+                    topic_prefix=config.mqtt.topic_prefix,
+                    qos=config.mqtt.qos,
+                    retain=config.mqtt.retain,
+                    discovery_prefix=(
+                        config.mqtt.discovery_prefix if config.mqtt.discovery_enabled else None
+                    ),
+                )
+    except (PlanNotAvailableError, MqttPublishError) as exc:
+        # Fail the run rather than materialising a green asset that published nothing. A silent
+        # success here is the worst outcome available: the house keeps acting on a stale retained
+        # plan while the UI says today's went out.
+        raise RuntimeError(str(exc)) from exc
+
+    context.log.info(
+        "%s for %s on %s: %s",
+        "Published" if outcome.published else "No-op",
+        site_id,
+        day,
+        outcome.reason,
+    )
+    return MaterializeResult(
+        metadata={
+            "published": outcome.published,
+            "reason": outcome.reason,
+            "topic": outcome.topic,
+            "messages": outcome.message_count,
+            "local_date": day.isoformat(),
+            "tariff_id": tariff_id,
+            "plan_status": outcome.payload.plan_status,
+            "planned_hours": outcome.payload.coverage.planned_hours,
+            "expected_hours": outcome.payload.coverage.expected_hours,
+            "retained": config.mqtt.retain,
+        }
+    )
+
+
+publishing_assets = [published_plan]

@@ -175,13 +175,44 @@ demo:
     @echo "    just warehouse    # build every mart"
     @echo ""
 
+# Boot the stack WITH the M10 MQTT broker, and print how to watch what lands on it.
+#
+# A separate recipe rather than a flag on `just demo`, because the broker is the one part of this
+# stack that exists to be published to. Nothing is sent until you run `just publish-plan` with
+# ENERGY_MQTT_ENABLED=1 -- the schedule ships stopped and the publisher refuses by default.
+demo-broker:
+    docker compose --profile broker up --build -d
+    @just dashboard-grants
+    @echo ""
+    @echo "  Dagster    http://localhost:3000"
+    @echo "  Dashboard  http://localhost:8501"
+    @echo "  Broker     mqtt://localhost:1883  (anonymous, demo only)"
+    @echo ""
+    @echo "  Watch what a Home Assistant instance would see:"
+    @echo "    docker compose exec mosquitto mosquitto_sub -t 'energy/#' -t 'homeassistant/#' -v"
+    @echo ""
+    @echo "  Then publish a seeded day (run 'just dbt-seed' and 'just warehouse' first):"
+    @echo "    ENERGY_MQTT_ENABLED=1 just publish-plan --date 2024-06-12 --tariff dynamic_2024"
+    @echo ""
+
+# Publish one Berlin day's dispatch plan to MQTT as a retained recommendation.
+#
+# Disabled by default: needs ENERGY_MQTT_ENABLED=1 and ENERGY_MQTT_HOST. `--dry-run` prints the
+# exact payload without a broker and without writing the publication ledger, which is the way to
+# see what a house would receive before enabling anything.
+publish-plan *ARGS:
+    uv run energy-platform publish-plan {{ARGS}}
+
 # Follow the stack's logs (what `just demo` used to do before it went detached).
 demo-logs:
     docker compose logs -f
 
 # Tear the stack down and drop the Postgres volume.
+#
+# `--profile broker` so a stack started with `just demo-broker` comes down completely. Without it
+# the profiled mosquitto container survives `down` and keeps port 1883 -- and its retained plans.
 demo-down:
-    docker compose down -v
+    docker compose --profile broker down -v
 
 # Run the dashboard against a local Postgres, without the container -- the edit-reload dev loop.
 # Needs `just dashboard-grants` once, and the dashboard extra: `uv sync --extra dashboard`.

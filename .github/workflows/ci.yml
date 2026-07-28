@@ -52,6 +52,22 @@ jobs:
         run: |
           PGPASSWORD=dagster psql -h localhost -U dagster -d dagster \
             -v ON_ERROR_STOP=1 -f dashboard/sql/grant_read_only.sql
+      - name: Start an MQTT broker
+        # A `docker run` step rather than a `services:` block, and not by preference: mosquitto 2.x
+        # refuses non-local connections until a listener is configured, and GitHub's `services:`
+        # can set `options:` but cannot mount a config file. The same ci/mosquitto.conf backs the
+        # compose `broker` profile, so CI and the demo run one broker configuration.
+        run: |
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v "$PWD/ci/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro" \
+            eclipse-mosquitto:2
+          for _ in $(seq 1 30); do
+            if docker exec mosquitto mosquitto_pub -h localhost -t ci/ready -m ok; then exit 0; fi
+            sleep 1
+          done
+          echo "mosquitto did not accept a publish within 30s" >&2
+          docker logs mosquitto >&2
+          exit 1
       - name: pytest
         # --extra on every invocation, not just the sync: `uv run` re-syncs the environment to the
         # options it is given, so a bare `uv run` here would uninstall Streamlit before the
@@ -66,6 +82,12 @@ jobs:
           ENERGY_PG_USER: dagster
           ENERGY_PG_PASSWORD: dagster
           ENERGY_PG_DB: dagster
+          # Same rule for the broker. Retention is a behaviour of the broker rather than of our
+          # code, so the one test that proves a retained plan reaches a later subscriber has to
+          # run against a real one -- and must fail, not skip, when it cannot.
+          ENERGY_REQUIRE_MQTT: "1"
+          ENERGY_MQTT_HOST: localhost
+          ENERGY_MQTT_PORT: "1883"
 
   compose-validate:
     runs-on: ubuntu-latest

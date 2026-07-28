@@ -46,6 +46,15 @@ dependencies = [
     # threadpoolctl to pin the fit to one thread so a re-fit reproduces on a given machine.
     "joblib>=1.4,<2",
     "threadpoolctl>=3.5,<4",
+    # M10's plan publisher. A RUNTIME dependency rather than an extra, unlike the dashboard: the
+    # scheduled publish job runs inside the Dagster daemon, whose image installs `--no-dev` main
+    # dependencies only, so an extra would simply not be there when the schedule fired. The weight
+    # argument that made Streamlit an extra does not apply either -- paho is a single pure-Python
+    # wheel with no transitive dependencies. It is still imported lazily, inside
+    # energy_platform.publishing.client.connect, so `energy-platform backfill` does not load an
+    # MQTT stack to write rows to Postgres; test_import_containment.py asserts that.
+    # Pinned to 2.x: the 1.x -> 2.x callback API is a breaking change (CallbackAPIVersion).
+    "paho-mqtt>=2.1,<3",
 ]
 
 [project.optional-dependencies]
@@ -86,6 +95,12 @@ dev = [
     # intended -- tests/test_import_containment.py fails if anything under src/energy_platform
     # imports matplotlib, so the script has to stay in scripts/.
     "matplotlib>=3.8,<4",
+    # M10 ships Jinja value_templates inside its Home Assistant discovery configs. They are
+    # rendered by Home Assistant, not by us, so nothing in the runtime path would ever catch a
+    # broken one -- it would surface as a row of "unknown" sensors in somebody's house. Declared
+    # explicitly rather than leaned on transitively (Dagster brings it): depending on another
+    # package's closure is how a minor bump elsewhere silently drops a test.
+    "jinja2>=3.1,<4",
 ]
 
 [build-system]
@@ -149,4 +164,5 @@ testpaths = ["tests"]
 addopts = "-ra -q"
 markers = [
     "postgres: requires a live Postgres database (raw-zone and derived-zone integration tests)",
+    "mqtt: requires a live MQTT broker (the M10 retention integration test)",
 ]

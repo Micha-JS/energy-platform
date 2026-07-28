@@ -12,6 +12,7 @@ from energy_platform.config import AppConfig
 from energy_platform.orchestration.assets import (
     forecasting_assets,
     market_data_assets,
+    publishing_assets,
     telemetry_assets,
     weather_assets,
 )
@@ -26,6 +27,7 @@ from energy_platform.orchestration.resources import (
 )
 from energy_platform.orchestration.schedules import (
     daily_market_data_schedule,
+    daily_publish_plan_schedule,
     daily_telemetry_schedule,
     daily_weather_actuals_schedule,
     daily_weather_forecast_schedule,
@@ -38,12 +40,20 @@ _config = AppConfig.from_env()
 _coordinates = {site_id: [lat, lon] for site_id, (lat, lon) in _config.site.coordinates.items()}
 
 defs = Definitions(
-    assets=[*market_data_assets, *weather_assets, *telemetry_assets, *forecasting_assets],
+    assets=[
+        *market_data_assets,
+        *weather_assets,
+        *telemetry_assets,
+        *forecasting_assets,
+        *publishing_assets,
+    ],
     schedules=[
         daily_market_data_schedule,
         daily_weather_actuals_schedule,
         daily_weather_forecast_schedule,
         daily_telemetry_schedule,
+        # Ships STOPPED -- the only one that does. See its definition for why.
+        daily_publish_plan_schedule,
     ],
     resources={
         "forecast_store": ForecastPostgresResource(

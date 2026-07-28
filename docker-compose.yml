@@ -58,13 +58,39 @@ services:
   dagster_daemon:
     build: .
     command: dagster-daemon run -w /opt/dagster/home/workspace.yaml
-    environment: *dagster-env
+    environment:
+      <<: *dagster-env
+      # Where the M10 publisher would send plans if it were switched on. Naming the host does NOT
+      # enable it: ENERGY_MQTT_ENABLED is absent, so the publisher refuses and its schedule ships
+      # STOPPED. This only means that when someone does enable it, the broker from the `broker`
+      # profile is already the right address -- rather than them discovering the default was
+      # "localhost" from inside a container.
+      ENERGY_MQTT_HOST: mosquitto
     volumes:
       - ./dagster.yaml:/opt/dagster/home/dagster.yaml:ro
       - ./workspace.yaml:/opt/dagster/home/workspace.yaml:ro
     depends_on:
       dagster_init:
         condition: service_completed_successfully
+
+  # M10's broker, behind a PROFILE so `just demo` does not start it. Publishing reaches out of the
+  # platform, and a stack that boots a broker by default invites the impression that something is
+  # already being sent. `just demo-broker` starts it deliberately.
+  mosquitto:
+    image: eclipse-mosquitto:2
+    profiles: ["broker"]
+    volumes:
+      - ./ci/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+    ports:
+      - "1883:1883"
+    healthcheck:
+      # Publishing to the broker is the only check that proves it is actually accepting clients;
+      # a port check would pass while mosquitto was still refusing anonymous connections.
+      test: ["CMD-SHELL", "mosquitto_pub -h localhost -t healthcheck -m ok -q 1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   # M9's presentation layer. Depends only on Postgres -- it reads marts and nothing else, so it
   # has no reason to wait for Dagster, and it renders a designed "no data yet" state rather than
@@ -97,3 +123,6 @@ services:
 
 volumes:
   pgdata:
+  # Retained messages survive a broker restart, which is what makes the demo's claim -- that
+  # Home Assistant re-reads the latest plan after a restart -- true rather than incidental.
+  mosquitto_data:

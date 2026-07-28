@@ -38,7 +38,7 @@ from collections.abc import Iterator, Sequence
 from contextlib import ExitStack
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -169,6 +169,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_dispatch(args)
     if args.command == "forward-dispatch":
         return _run_forward_dispatch(args)
+    if args.command == "publish-plan":
+        return _run_publish_plan(args)
     parser.print_help()
     return 1
 
@@ -392,6 +394,44 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Comma-separated consumption tariff ids (default: every static/dynamic row in the "
         "catalogue).",
+    )
+
+    publish = sub.add_parser(
+        "publish-plan",
+        help="Publish a day's dispatch plan to MQTT as a retained recommendation.",
+        description=(
+            "Reads the forward plan M8 already computed for one Berlin day and publishes it as a "
+            "retained JSON document a Home Assistant instance can consume. The payload is a "
+            "RECOMMENDATION, not a command: this platform has no write path to an inverter and "
+            "publishes no command topic. Disabled by default -- needs ENERGY_MQTT_ENABLED=1 and "
+            "ENERGY_MQTT_HOST."
+        ),
+    )
+    publish.add_argument(
+        "--date",
+        dest="target_date",
+        default=None,
+        type=date.fromisoformat,
+        metavar="YYYY-MM-DD",
+        help="The Europe/Berlin day to publish (default: today).",
+    )
+    publish.add_argument(
+        "--site",
+        default=None,
+        help="Site id to publish for (default: the configured default site).",
+    )
+    publish.add_argument(
+        "--tariff",
+        default=None,
+        help="Consumption tariff whose plan to publish (default: ENERGY_TARIFF_ID). There is no "
+        "guess here: a day is planned once per tariff, and publishing the wrong one would send a "
+        "well-formed plan for a tariff the household is not on.",
+    )
+    publish.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Assemble and print the exact payload without connecting to a broker or writing the "
+        "publication ledger. Works with the publisher disabled.",
     )
     return parser
 
@@ -1285,6 +1325,92 @@ def _log_missing(dataset: Dataset, result: IngestResult) -> None:
         result.expected_count,
         result.null_count,
     )
+
+
+def _run_publish_plan(args: argparse.Namespace) -> int:
+    """Publish one Berlin day's plan, or explain why there is nothing to publish.
+
+    The publishing package is imported here rather than at module level for the reason the
+    forecasting one is: it pulls an MQTT stack that a ``backfill`` run has no use for, and
+    ``tests/test_import_containment.py`` asserts that importing the CLI does not load paho.
+    """
+    from contextlib import nullcontext
+
+    from energy_platform.publishing.client import (
+        MqttPublisher,
+        MqttPublishError,
+        RecordingPublisher,
+        connect,
+    )
+    from energy_platform.publishing.publisher import publish_plan
+    from energy_platform.publishing.reader import ForwardPlanReader, PlanNotAvailableError
+    from energy_platform.publishing.store import PublicationRepository
+
+    config = AppConfig.from_env()
+    site_id = args.site or config.site.default_id
+    config.site.resolve(site_id)  # fail here, not after a broker connection, on an unknown site
+    tariff_id = args.tariff or config.tariffs.consumption_tariff_id
+    day = args.target_date or datetime.now(ZoneInfo(PARTITION_TIMEZONE)).date()
+
+    if args.dry_run:
+        logger.info("DRY RUN -- assembling the payload, publishing nothing.")
+
+    with psycopg.connect(config.postgres.dsn) as conn:
+        reader = ForwardPlanReader(conn, derived_schema=config.postgres.derived_schema)
+        ledger: PublicationRepository | None = None
+        if not args.dry_run:
+            ledger = PublicationRepository(conn, derived_schema=config.postgres.derived_schema)
+            ledger.ensure_schema()
+
+        # A dry run never opens a socket, which is what lets it work with the publisher disabled --
+        # the case where someone most wants to see what would be sent before enabling it.
+        recorder = RecordingPublisher()
+        broker: Any = nullcontext(recorder) if args.dry_run else connect(config.mqtt)
+        try:
+            with broker as publisher:
+                outcome = publish_plan(
+                    reader,
+                    publisher if not args.dry_run else recorder,
+                    ledger,
+                    site_id=site_id,
+                    day=day,
+                    tariff_id=tariff_id,
+                    now=datetime.now(UTC),
+                    topic_prefix=config.mqtt.topic_prefix,
+                    qos=config.mqtt.qos,
+                    retain=config.mqtt.retain,
+                    discovery_prefix=(
+                        config.mqtt.discovery_prefix if config.mqtt.discovery_enabled else None
+                    ),
+                )
+        except (PlanNotAvailableError, MqttPublishError) as exc:
+            raise SystemExit(str(exc)) from exc
+        assert isinstance(publisher, MqttPublisher)  # narrow for the type checker
+
+    if args.dry_run:
+        print(json.dumps(outcome.payload.to_dict(), indent=2, sort_keys=True))
+        logger.info(
+            "Dry run: %d message(s) would go to %s (plan + discovery).",
+            len(recorder.messages) or 1,
+            outcome.topic,
+        )
+        return 0
+
+    if not outcome.published:
+        logger.info("No-op for %s on %s: %s", site_id, day, outcome.reason)
+        return 0
+    logger.info(
+        "Published %s plan for %s on %s to %s (%d message(s), retain=%s, qos=%d): %s",
+        tariff_id,
+        site_id,
+        day,
+        outcome.topic,
+        outcome.message_count,
+        config.mqtt.retain,
+        config.mqtt.qos,
+        outcome.reason,
+    )
+    return 0
 
 
 def _log_summary(outcomes: Counter[WriteOutcome], days_with_missing: int, failures: int) -> None:

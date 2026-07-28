@@ -141,6 +141,28 @@ def test_importing_the_cli_does_not_load_the_heavy_stack() -> None:
     )
 
 
+def test_importing_the_cli_does_not_load_an_mqtt_stack() -> None:
+    """M10's publisher is a main dependency, so only a lazy import keeps it off the ingest path.
+
+    Unlike the scientific stack there is no AST rule for paho -- it is a legitimate first-party
+    import inside ``energy_platform.publishing.client``, and it has to be, because the scheduled
+    publish job runs in the Dagster daemon image where extras are not installed. What keeps
+    ``energy-platform backfill`` from carrying an MQTT client is the import sitting inside
+    ``connect()`` rather than at module scope, and that is only checkable at runtime.
+    """
+    probe = (
+        "import energy_platform.cli, sys;"
+        "assert 'paho' not in sys.modules, 'importing the CLI loaded paho'"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, (
+        "the paho import belongs inside energy_platform.publishing.client.connect, not at module "
+        f"level.\n{result.stderr}"
+    )
+
+
 def test_matplotlib_stays_out_of_the_package_entirely() -> None:
     """M8's README figure is a script, not a capability of the platform -- enforced, not intended.
 

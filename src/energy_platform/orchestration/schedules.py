@@ -18,6 +18,7 @@ from energy_platform.orchestration.assets import (
     market_data_assets,
     open_meteo_weather_actuals_raw,
     open_meteo_weather_forecast_raw,
+    published_plan,
     synthetic_telemetry_raw,
 )
 from energy_platform.orchestration.partition_config import PARTITION_TIMEZONE
@@ -117,3 +118,38 @@ def daily_telemetry_schedule(context: ScheduleEvaluationContext) -> RunRequest:
     """
     target_day = context.scheduled_execution_time.date() - timedelta(days=ARCHIVE_LAG_DAYS)
     return RunRequest(partition_key=target_day.isoformat())
+
+
+# -- Publishing: the one schedule that speaks OUT of the platform ----------------------
+
+publish_plan_job = define_asset_job(
+    name="publish_plan_job",
+    selection=[published_plan],
+)
+
+
+@schedule(
+    job=publish_plan_job,
+    # 00:15 Europe/Berlin: after the decision time the plan is defined at (DECISION_RULE_ID is
+    # "berlin_midnight_before_target_day"), and early enough that a house has the day's schedule
+    # before the first hour of it is over. Publishing before midnight would advertise a plan for a
+    # day that, by the platform's own decision rule, has not been decided yet.
+    cron_schedule="15 0 * * *",
+    execution_timezone=PARTITION_TIMEZONE,
+    # STOPPED, and the only schedule here that is -- every other one accrues data into the
+    # platform's own storage, where the cost of an unwanted run is a wasted API call. This one
+    # transmits a recommendation to a household's automation system. A fresh deploy that started
+    # broadcasting because nobody thought to look at the schedules page would be a genuinely bad
+    # surprise, so enabling it is a deliberate act. Same reasoning that leaves the real Fenecon
+    # asset defined but unscheduled.
+    default_status=DefaultScheduleStatus.STOPPED,
+)
+def daily_publish_plan_schedule(context: ScheduleEvaluationContext) -> RunRequest:
+    """Publish the plan for the Berlin day that has just begun.
+
+    Unpartitioned: the asset publishes *the current plan*, and the broker keeps exactly one
+    retained message per topic. The history lives in derived.plan_publications and in the
+    forward-dispatch tables, not in a partition per day.
+    """
+    del context  # the asset resolves today itself, from the same partition timezone
+    return RunRequest()
