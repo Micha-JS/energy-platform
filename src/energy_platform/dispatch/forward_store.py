@@ -40,7 +40,12 @@ from psycopg.types.json import Jsonb
 from energy_platform.config import BatteryConfig
 from energy_platform.dispatch.decision import DECISION_RULE_ID, PRICE_PUBLICATION_RULE_ID
 from energy_platform.dispatch.execution import ExecutedHour
-from energy_platform.dispatch.forward import ForwardSolution, NotSimulated, local_date_of
+from energy_platform.dispatch.forward import (
+    ForwardSolution,
+    NotSimulated,
+    PlannedHourContext,
+    local_date_of,
+)
 from energy_platform.dispatch.model import DispatchHour, DispatchResult, Scenario, round_kwh
 from energy_platform.dispatch.windows import CoverageWindow
 from energy_platform.forecasting.vintage import SELECTION_RULE_ID
@@ -203,7 +208,19 @@ def _ddl(schema: str) -> list[sql.Composed]:
                 -- recorded, so only it has a plan to have departed from.
                 planned_battery_charge_kwh    double precision,
                 planned_battery_discharge_kwh double precision,
-                was_clipped           boolean
+                was_clipped           boolean,
+                -- What the plan EXPECTED, beside what it instructed (M10). The solve derives all
+                -- of this and the first version of this table kept only the battery pair, so a
+                -- consumer wanting to know what the house was expected to draw had to recompute it
+                -- from the planned flows and the forecasts -- a second derivation of one plan, free
+                -- to disagree with this one. The publisher reads these columns instead.
+                -- Also null wherever `planned_battery_*` is: an hour the solve could not resolve
+                -- expected nothing, and a zero here would be a fabricated reading.
+                planned_pv_production_kwh     double precision,
+                planned_household_load_kwh    double precision,
+                planned_grid_import_kwh       double precision,
+                planned_grid_export_kwh       double precision,
+                planned_soc_kwh               double precision
             )
             """
         ).format(schema=ident),
@@ -532,10 +549,12 @@ class ForwardDispatchRepository:
         result: DispatchResult,
         run_id: int,
     ) -> int:
+        is_forecast_driven = result.scenario is Scenario.FORECAST_DRIVEN
         planned: Sequence[ExecutedHour | None] = (
-            solution.execution.hours
-            if result.scenario is Scenario.FORECAST_DRIVEN
-            else (None,) * len(result.hours)
+            solution.execution.hours if is_forecast_driven else (None,) * len(result.hours)
+        )
+        context: Sequence[PlannedHourContext | None] = (
+            solution.planned_context if is_forecast_driven else (None,) * len(result.hours)
         )
         rows = [
             (
@@ -561,8 +580,13 @@ class ForwardDispatchRepository:
                 round_kwh(plan.planned_charge_kwh) if plan is not None else None,
                 round_kwh(plan.planned_discharge_kwh) if plan is not None else None,
                 plan.was_clipped if plan is not None else None,
+                expected.pv_production_kwh if expected is not None else None,
+                expected.household_load_kwh if expected is not None else None,
+                round_kwh(expected.grid_import_kwh) if expected is not None else None,
+                round_kwh(expected.grid_export_kwh) if expected is not None else None,
+                round_kwh(expected.soc_kwh) if expected is not None else None,
             )
-            for hour, plan in zip(result.hours, planned, strict=True)
+            for hour, plan, expected in zip(result.hours, planned, context, strict=True)
         ]
         cur.executemany(
             sql.SQL(
@@ -574,10 +598,12 @@ class ForwardDispatchRepository:
                     grid_import_kwh, grid_export_kwh,
                     price_eur_mwh, import_price_ct_kwh,
                     energy_cost_eur, feed_in_revenue_eur, is_priced,
-                    planned_battery_charge_kwh, planned_battery_discharge_kwh, was_clipped
+                    planned_battery_charge_kwh, planned_battery_discharge_kwh, was_clipped,
+                    planned_pv_production_kwh, planned_household_load_kwh,
+                    planned_grid_import_kwh, planned_grid_export_kwh, planned_soc_kwh
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s)
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """
             ).format(schema=sql.Identifier(self._derived)),
             rows,

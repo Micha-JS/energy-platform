@@ -128,6 +128,33 @@ class DayOutcome:
 
 
 @dataclass(frozen=True, slots=True)
+class PlannedHourContext:
+    """What the day-ahead solve *expected* an hour to look like, beside what it asked the battery.
+
+    ``PlannedHour`` carries only the battery pair, because that is the whole of the instruction the
+    executor has to carry out. But the solve knows considerably more than it instructs: it worked
+    the schedule out from a forecast of PV and load, and the grid exchange and state of charge fall
+    out of the same solve. All of that used to be discarded at the end of :func:`_plan_for_day`.
+
+    M10 needs it. A plan published to a house has to say what the house is expected to draw from
+    and return to the grid, not merely what the battery should do -- and the alternative to
+    recording it here was for the publisher to recompute it from the planned battery flows and the
+    forecasts, which would have created a second derivation of the same plan, free to disagree with
+    the warehouse's. Same reasoning that made M9 expose ``attainable_savings_eur`` rather than let
+    the dashboard divide two columns.
+
+    ``None`` for an hour the solve could not resolve. Recorded only for the forecast-driven run;
+    the reference scenarios have no plan to have expected anything.
+    """
+
+    pv_production_kwh: float | None
+    household_load_kwh: float | None
+    grid_import_kwh: float
+    grid_export_kwh: float
+    soc_kwh: float | None
+
+
+@dataclass(frozen=True, slots=True)
 class NotSimulated:
     """A declared window the simulation could not cover, and why."""
 
@@ -150,6 +177,8 @@ class ForwardSolution:
     results: tuple[DispatchResult, ...]
     days: tuple[DayOutcome, ...]
     execution: Execution
+    # Aligned one-to-one with ``execution.hours``: what the plan expected, beside what happened.
+    planned_context: tuple[PlannedHourContext | None, ...]
     pv_model_key: str
     load_model_key: str
 
@@ -226,7 +255,7 @@ def simulate(
     plannable = _plannable_days(sim_days, by_date, pv_days, load_days)
 
     soc_start = baselines.initial_soc_kwh(battery)
-    execution, outcomes = _roll(
+    execution, outcomes, planned_context = _roll(
         sim_days,
         by_date,
         spec,
@@ -242,7 +271,7 @@ def simulate(
     # hindsight optimum is the price of deciding one day at a time; subtracting it from the
     # forecast-driven shortfall is what separates model error from controller design. Without this
     # the headline would blame the forecast for a myopia no forecast could fix.
-    oracle_execution, _ = _roll(
+    oracle_execution, _, _ = _roll(
         sim_days,
         by_date,
         spec,
@@ -287,6 +316,7 @@ def simulate(
         results=results,
         days=tuple(outcomes),
         execution=execution,
+        planned_context=tuple(planned_context),
         pv_model_key=pv_plan.model_key,
         load_model_key=load_plan.model_key,
     )
@@ -304,7 +334,7 @@ def _roll(
     load_days: Mapping[date, DayForecast],
     plannable: AbstractSet[date],
     continuation_eur_kwh: float,
-) -> tuple[Execution, list[DayOutcome]]:
+) -> tuple[Execution, list[DayOutcome], list[PlannedHourContext | None]]:
     """Plan, execute and chain, one Berlin day at a time.
 
     The whole rolling structure lives here so that the perfect-foresight reference runs through
@@ -323,6 +353,7 @@ def _roll(
     soc_kwh = soc_start
     executed_hours: list[ExecutedHour] = []
     outcomes: list[DayOutcome] = []
+    planned_context: list[PlannedHourContext | None] = []
 
     for day in sim_days:
         day_hours = by_date[day]
@@ -333,7 +364,7 @@ def _roll(
 
         day_prices = window_prices(spec, feed_in, day_hours)
         pv_day, load_day = pv_days.get(day), load_days.get(day)
-        plan, status, clamped = _plan_for_day(
+        plan, context, status, clamped = _plan_for_day(
             day_hours,
             day_prices,
             battery,
@@ -346,6 +377,7 @@ def _roll(
         execution = execute_plan(plan, day_hours, day_prices, battery, soc_start_kwh=soc_kwh)
 
         executed_hours.extend(execution.hours)
+        planned_context.extend(context)
         outcomes.append(
             DayOutcome(
                 local_date=day,
@@ -365,6 +397,7 @@ def _roll(
     return (
         Execution(tuple(executed_hours), soc_start_kwh=soc_start, soc_end_kwh=soc_kwh),
         outcomes,
+        planned_context,
     )
 
 
@@ -451,15 +484,19 @@ def _plan_for_day(
     continuation_eur_kwh: float,
     *,
     plannable: bool,
-) -> tuple[tuple[PlannedHour, ...], str, int]:
-    """The battery trajectory this day was decided on, and how it was arrived at.
+) -> tuple[tuple[PlannedHour, ...], tuple[PlannedHourContext | None, ...], str, int]:
+    """The battery trajectory this day was decided on, what it expected, and how it was arrived at.
 
     ``plannable`` is the single source of truth and is not re-derived here from ``pv_day`` and
     ``load_day``: see :func:`_plannable_days` for why a second opinion about it is the confound
     this milestone's headline figure is most vulnerable to.
+
+    Returns the expected physics alongside the instruction -- see :class:`PlannedHourContext` for
+    why the solve's own view of the day is worth keeping rather than reconstructing later.
     """
     if not plannable:
-        return _naive_fallback(day_hours, day_prices, battery, soc_kwh), PLAN_STATUS_FALLBACK, 0
+        plan, context = _naive_fallback(day_hours, day_prices, battery, soc_kwh)
+        return plan, context, PLAN_STATUS_FALLBACK, 0
     assert pv_day is not None and load_day is not None  # guaranteed by _plannable_days
 
     forecast_hours = _forecast_inputs(day_hours, pv_day, load_day)
@@ -475,8 +512,21 @@ def _plan_for_day(
         PlannedHour(hour.battery_charge_kwh or 0.0, hour.battery_discharge_kwh or 0.0)
         for hour in solved.hours
     )
+    # The forecast physics the solve was handed, beside the grid exchange it implies. Both come
+    # straight off the same solved schedule, so a published plan and the warehouse are describing
+    # one object rather than two computations of it.
+    context = tuple(
+        PlannedHourContext(
+            pv_production_kwh=inputs.pv_production_kwh,
+            household_load_kwh=inputs.household_load_kwh,
+            grid_import_kwh=hour.grid_import_kwh or 0.0,
+            grid_export_kwh=hour.grid_export_kwh or 0.0,
+            soc_kwh=hour.soc_kwh,
+        )
+        for hour, inputs in zip(solved.hours, forecast_hours, strict=True)
+    )
     clamped = pv_day.clamped_hours + load_day.clamped_hours
-    return plan, PLAN_STATUS_PLANNED, clamped
+    return plan, context, PLAN_STATUS_PLANNED, clamped
 
 
 def _forecast_inputs(
@@ -508,7 +558,7 @@ def _naive_fallback(
     day_prices: WindowPrices,
     battery: BatteryConfig,
     soc_kwh: float,
-) -> tuple[PlannedHour, ...]:
+) -> tuple[tuple[PlannedHour, ...], tuple[PlannedHourContext | None, ...]]:
     """What the controller does on a day it has no usable forecast for: self-consume.
 
     Built from the day's *actuals* rather than from a forecast, and that is correct rather than a
@@ -518,18 +568,33 @@ def _naive_fallback(
     ``dispatch_hour`` is called so the fallback is the shipped policy rather than a second opinion
     about it, and the resulting trajectory is feasible by construction, so ``execute_plan`` replays
     it without clipping anything.
+
+    Its expected physics is the day's *actuals*, and for the same reason the plan is: a reactive
+    rule expects whatever it is looking at. Publishing a fallback day therefore advertises the
+    self-consumption trajectory rather than a forecast, which is exactly what the house would do.
     """
     plan: list[PlannedHour] = []
+    context: list[PlannedHourContext | None] = []
     for index, hour in enumerate(day_hours):
         if not hour.has_physics or not day_prices.is_priced(index):
             plan.append(PlannedHour(0.0, 0.0))
+            context.append(None)
             continue
         assert hour.pv_production_kwh is not None  # guaranteed by has_physics
         assert hour.household_load_kwh is not None
         outcome = dispatch_hour(hour.pv_production_kwh, hour.household_load_kwh, soc_kwh, battery)
         soc_kwh = outcome.soc_kwh
         plan.append(PlannedHour(outcome.charge, outcome.discharge))
-    return tuple(plan)
+        context.append(
+            PlannedHourContext(
+                pv_production_kwh=hour.pv_production_kwh,
+                household_load_kwh=hour.household_load_kwh,
+                grid_import_kwh=outcome.grid_import,
+                grid_export_kwh=outcome.grid_export,
+                soc_kwh=outcome.soc_kwh,
+            )
+        )
+    return tuple(plan), tuple(context)
 
 
 def _hours_by_date(hours: Sequence[HourInputs]) -> dict[date, tuple[HourInputs, ...]]:

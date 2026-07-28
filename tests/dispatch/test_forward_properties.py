@@ -223,6 +223,59 @@ def test_the_executed_dispatch_is_physically_possible(
     assert solution.days[-1].soc_end_kwh == pytest.approx(solution.execution.soc_end_kwh, abs=_KWH)
 
 
+# -- Property: what the plan expected is self-consistent --------------------------------------
+
+
+@given(window=_windows, battery=_batteries, bias=_bias)
+@_slow
+def test_the_plans_expected_physics_balances_against_its_own_forecast(
+    window: tuple[list[float], list[float], list[float]], battery: BatteryConfig, bias: float
+) -> None:
+    """The AC node closes for the *plan* too, against the forecast it was built from.
+
+    M10 publishes the expected grid exchange to a house, so it has to be a coherent statement about
+    a day rather than four numbers that happen to sit in a row. This is the plan-side twin of the
+    realised-physics check above: same identity, forecast inputs instead of actuals.
+
+    It also pins the thing recomputation would have got wrong. The published grid exchange comes
+    off the solve; if it were instead reconstructed downstream from the planned battery flows and
+    the forecasts, any disagreement about efficiency, clipping or rounding would show up as a house
+    told to expect an import it never sees. Asserting the identity here is what makes the recorded
+    columns trustworthy enough not to need recomputing.
+    """
+    solution = _simulate(window, battery, bias)
+    lower = battery.soc_min * battery.capacity_kwh
+    upper = battery.soc_max * battery.capacity_kwh
+
+    planned = solution.execution.hours
+    context = solution.planned_context
+    assert len(context) == len(planned), "the plan context must align with the executed hours"
+
+    checked = 0
+    for hour, expected in zip(planned, context, strict=True):
+        if expected is None:
+            continue
+        assert expected.pv_production_kwh is not None
+        assert expected.household_load_kwh is not None
+        assert expected.soc_kwh is not None
+        checked += 1
+
+        supplied = (
+            expected.pv_production_kwh + expected.grid_import_kwh + hour.planned_discharge_kwh
+        )
+        consumed = expected.household_load_kwh + expected.grid_export_kwh + hour.planned_charge_kwh
+        assert supplied == pytest.approx(consumed, abs=_KWH), "the plan's own energy does not close"
+
+        # A plan that intended to leave the band would be infeasible before execution ever clipped
+        # it, so this is about the solve, not about recourse.
+        assert lower - _KWH <= expected.soc_kwh <= upper + _KWH
+        assert expected.grid_import_kwh >= -_KWH and expected.grid_export_kwh >= -_KWH
+
+    # Guards against a silent pass on an all-None context -- the shape of failure a change that
+    # stopped recording the plan's expectations would actually take.
+    assert checked > 0, "no planned hour carried an expectation to check"
+
+
 # -- Property: hindsight optimality, which IS a theorem --------------------------------------
 
 
