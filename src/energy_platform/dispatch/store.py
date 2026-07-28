@@ -41,7 +41,7 @@ from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from energy_platform.config import BatteryConfig
-from energy_platform.dispatch.model import DispatchResult, HourInputs, round_eur
+from energy_platform.dispatch.model import DispatchResult, HourInputs, round_eur, round_kwh
 from energy_platform.dispatch.runner import WindowSolution
 from energy_platform.dispatch.windows import CoverageWindow
 from energy_platform.rows import as_float
@@ -327,15 +327,15 @@ class DispatchRepository:
                 # either here would break the identity the mart documents.
                 result.terminal_soc_delta_kwh,
                 result.terminal_discharge_efficiency,
-                _kwh(result.soc_start_kwh),
-                _kwh(result.soc_end_kwh),
+                round_kwh(result.soc_start_kwh),
+                round_kwh(result.soc_end_kwh),
                 result.energy_cost_eur,
                 result.feed_in_revenue_eur,
                 result.net_cost_eur,
                 result.terminal_value_eur,
                 result.objective_eur,
-                _kwh(result.battery_charge_kwh),
-                _kwh(result.battery_discharge_kwh),
+                round_kwh(result.battery_charge_kwh),
+                round_kwh(result.battery_discharge_kwh),
                 result.priced_hours,
                 solution.expected_hours,
                 params,
@@ -366,11 +366,11 @@ class DispatchRepository:
                 hour.ts_utc,
                 hour.pv_production_kwh,
                 hour.household_load_kwh,
-                _kwh(hour.battery_charge_kwh),
-                _kwh(hour.battery_discharge_kwh),
-                _kwh(hour.soc_kwh),
-                _kwh(hour.grid_import_kwh),
-                _kwh(hour.grid_export_kwh),
+                round_kwh(hour.battery_charge_kwh),
+                round_kwh(hour.battery_discharge_kwh),
+                round_kwh(hour.soc_kwh),
+                round_kwh(hour.grid_import_kwh),
+                round_kwh(hour.grid_export_kwh),
                 hour.price_eur_mwh,
                 hour.import_price_ct_kwh,
                 hour.energy_cost_eur,
@@ -440,14 +440,6 @@ def _input_digest(solution: WindowSolution, battery: BatteryConfig) -> str:
         separators=(",", ":"),
     )
     return hashlib.sha256(payload.encode()).hexdigest()
-
-
-def _kwh(value: float | None) -> float | None:
-    """Quantise energy at the persistence boundary, to 1 Wh -- M3's meter resolution."""
-    if value is None:
-        return None
-    rounded = round(value, 3)
-    return rounded if rounded != 0 else 0.0
 
 
 def _as_datetime(value: object) -> datetime:

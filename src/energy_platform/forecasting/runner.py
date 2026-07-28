@@ -51,6 +51,7 @@ from energy_platform.forecasting.models import (
     HYPERPARAMETERS,
     QUANTILES,
     ModelCard,
+    QuantileForecaster,
     fit_quantile_forecaster,
     library_versions,
 )
@@ -128,7 +129,7 @@ class BacktestResult:
 
 
 @dataclass(frozen=True, slots=True)
-class _DayData:
+class DayData:
     """Everything a target day needs, built once whether or not the day becomes a fold."""
 
     rows: tuple[FeatureRow, ...]
@@ -139,7 +140,7 @@ class _DayData:
 
 
 @dataclass(frozen=True, slots=True)
-class _TrainRow:
+class TrainRow:
     """One candidate training row: the features, the label, and the physics under it.
 
     ``day`` rides along so a run can report the span it actually trained on, and ``physical`` so the
@@ -153,7 +154,7 @@ class _TrainRow:
 
 
 @dataclass(frozen=True, slots=True)
-class _FitSummary:
+class FitSummary:
     """What one fit actually consumed, as opposed to what was offered to it.
 
     The two differ, and not marginally: ``_fit_and_predict`` drops every candidate whose label is
@@ -168,7 +169,7 @@ class _FitSummary:
     end: date
 
 
-def _role_for(model_key: str, training_data_source: str) -> str:
+def role_for(model_key: str, training_data_source: str) -> str:
     """The toy model is the oracle on synthetic data, and an ordinary model on real data."""
     if model_key in {MODEL_PERSISTENCE, MODEL_SEASONAL_NAIVE}:
         return ROLE_BASELINE
@@ -177,11 +178,11 @@ def _role_for(model_key: str, training_data_source: str) -> str:
     return ROLE_MODEL
 
 
-def _target_value(observation: Observation, target: str) -> float | None:
+def target_value(observation: Observation, target: str) -> float | None:
     return observation.pv_production_kwh if target == TARGET_PV else observation.household_load_kwh
 
 
-def _fold_days(days: Sequence[date], config: ForecastConfig) -> list[tuple[int, date]]:
+def fold_days(days: Sequence[date], config: ForecastConfig) -> list[tuple[int, date]]:
     """``(fold index, test day)`` -- one test day per stride, once enough history exists.
 
     Expanding window: fold *n* trains on everything observable at its test day's issue instant, so
@@ -195,8 +196,128 @@ def _fold_days(days: Sequence[date], config: ForecastConfig) -> list[tuple[int, 
     ]
 
 
-def _hours_of_day(observations: Sequence[Observation], day: date) -> list[Observation]:
+def hours_of_day(observations: Sequence[Observation], day: date) -> list[Observation]:
     return [observation for observation in observations if observation.local_date == day]
+
+
+def index_vintages(
+    vintages: Sequence[VintageHour],
+) -> tuple[dict[int, dict[int, Mapping[str, float | None]]], list[int]]:
+    """Group stored vintages by issue instant, and list those instants in order.
+
+    The store deliberately hands back *every* vintage, because the selection rule lives in exactly
+    one place (:func:`select_vintage`) and a repository that pre-filtered would be a second copy of
+    it. This is the indexing both consumers of that rule need before they can apply it.
+    """
+    by_issue: dict[int, dict[int, Mapping[str, float | None]]] = {}
+    for vintage in vintages:
+        by_issue.setdefault(vintage.issue_ms, {})[vintage.target_ts_utc_ms] = vintage.values
+    return by_issue, sorted(by_issue)
+
+
+def prepare_day(
+    day: date,
+    *,
+    observations: Sequence[Observation],
+    by_issue: Mapping[int, Mapping[int, Mapping[str, float | None]]],
+    issue_times: Sequence[int],
+    history: Mapping[int, float | None],
+    site: Site,
+    pv: PvSystemConfig,
+    config: ForecastConfig,
+    target: str,
+) -> DayData | None:
+    """Everything one target day needs, or ``None`` when the day cannot honestly be predicted.
+
+    Two ways it returns ``None``, and neither fabricates a fallback: no vintage was issued before
+    the day began, or the day has no hours to build rows from. A day with no forecast gets no
+    prediction rather than the nearest available one.
+
+    Extracted from :func:`backtest` so M8's serving path resolves the vintage rule, builds the
+    features and runs the physical chain through *this* function rather than a second copy of it.
+    A serving path that re-derived any of the three could disagree with the backtest that scored the
+    model, and the disagreement would look like forecast error.
+    """
+    issue_ms = issue_time_ms(day)
+    vintage_ms = select_vintage(issue_times, day)
+    if vintage_ms is None:
+        return None
+    day_hours = hours_of_day(observations, day)
+    rows, actuals = build_rows(
+        day_hours, by_issue[vintage_ms], issue_ms, vintage_ms, history, site, pv, config, target
+    )
+    if not rows:
+        return None
+    toy_kwh, pvlib_kwh = physical_kwh(day_hours, by_issue[vintage_ms], site, pv, target)
+    return DayData(
+        rows=tuple(rows),
+        actuals=tuple(actuals),
+        vintage_ms=vintage_ms,
+        toy_kwh=toy_kwh,
+        pvlib_kwh=pvlib_kwh,
+    )
+
+
+def prepare_days(
+    days: Sequence[date],
+    *,
+    observations: Sequence[Observation],
+    by_issue: Mapping[int, Mapping[int, Mapping[str, float | None]]],
+    issue_times: Sequence[int],
+    history: Mapping[int, float | None],
+    site: Site,
+    pv: PvSystemConfig,
+    config: ForecastConfig,
+    target: str,
+) -> tuple[dict[date, DayData], list[date]]:
+    """Prepare every day up front, returning ``(prepared, skipped)``.
+
+    Every day, not only the ones that become folds. The expanding training window is then a property
+    of the data -- "every row observable at this fold's issue instant" -- rather than of how often
+    folds happen to be taken. Deriving it from loop order instead would silently shrink the training
+    set to one row per fold as the stride widened, which is the sort of coupling that shows up as an
+    unexplained accuracy cliff.
+    """
+    prepared: dict[date, DayData] = {}
+    skipped: list[date] = []
+    for day in days:
+        prepared_day = prepare_day(
+            day,
+            observations=observations,
+            by_issue=by_issue,
+            issue_times=issue_times,
+            history=history,
+            site=site,
+            pv=pv,
+            config=config,
+            target=target,
+        )
+        if prepared_day is None:
+            skipped.append(day)
+            continue
+        prepared[day] = prepared_day
+    return prepared, skipped
+
+
+def training_rows(prepared: Mapping[date, DayData], days: Sequence[date]) -> list[TrainRow]:
+    """Every candidate training row across the prepared days, in day order.
+
+    Candidates, not the training set: the caller still filters them through
+    :func:`~energy_platform.forecasting.vintage.is_observable` against its own issue instant. Only
+    the flattening lives here, and it lives here so the PV residual's physical baseline is paired
+    with its row in exactly one place.
+    """
+    return [
+        TrainRow(day=day, row=row, actual=actual, physical=physical)
+        for day in days
+        if day in prepared
+        for row, actual, physical in zip(
+            prepared[day].rows,
+            prepared[day].actuals,
+            prepared[day].pvlib_kwh or (None,) * len(prepared[day].rows),
+            strict=True,
+        )
+    ]
 
 
 def backtest(
@@ -212,64 +333,32 @@ def backtest(
 ) -> BacktestResult:
     """Evaluate every model for one target over one declared window."""
     history: dict[int, float | None] = {
-        observation.ts_utc_ms: _target_value(observation, target) for observation in observations
+        observation.ts_utc_ms: target_value(observation, target) for observation in observations
     }
-    by_issue: dict[int, dict[int, Mapping[str, float | None]]] = {}
-    for vintage in vintages:
-        by_issue.setdefault(vintage.issue_ms, {})[vintage.target_ts_utc_ms] = vintage.values
-    issue_times = sorted(by_issue)
+    by_issue, issue_times = index_vintages(vintages)
 
     days = sorted({observation.local_date for observation in observations})
 
-    # Build features for EVERY day up front, not only for the days that become test folds. The
-    # expanding training window is then a property of the data -- "every row observable at this
-    # fold's issue instant" -- rather than of how often folds happen to be taken. Deriving it from
-    # loop order instead would silently shrink the training set to one row per fold as the stride
-    # widened, which is the sort of coupling that shows up as an unexplained accuracy cliff.
-    prepared: dict[date, _DayData] = {}
-    skipped: list[date] = []
-    feature_names: tuple[str, ...] = ()
-
-    for day in days:
-        issue_ms = issue_time_ms(day)
-        vintage_ms = select_vintage(issue_times, day)
-        if vintage_ms is None:
-            # No forecast existed before this day began. No prediction rather than a fabricated one.
-            skipped.append(day)
-            continue
-        day_hours = _hours_of_day(observations, day)
-        rows, actuals = _build_rows(
-            day_hours, by_issue[vintage_ms], issue_ms, vintage_ms, history, site, pv, config, target
-        )
-        if not rows:
-            skipped.append(day)
-            continue
-        toy_kwh, pvlib_kwh = _physical_kwh(day_hours, by_issue[vintage_ms], site, pv, target)
-        prepared[day] = _DayData(
-            rows=tuple(rows),
-            actuals=tuple(actuals),
-            vintage_ms=vintage_ms,
-            toy_kwh=toy_kwh,
-            pvlib_kwh=pvlib_kwh,
-        )
-        feature_names = rows[0].names
+    prepared, skipped = prepare_days(
+        days,
+        observations=observations,
+        by_issue=by_issue,
+        issue_times=issue_times,
+        history=history,
+        site=site,
+        pv=pv,
+        config=config,
+        target=target,
+    )
+    prepared_days = [day for day in days if day in prepared]
+    feature_names: tuple[str, ...] = (
+        prepared[prepared_days[-1]].rows[0].names if prepared_days else ()
+    )
 
     collected: dict[str, list[Prediction]] = {}
-    every_row: list[_TrainRow] = [
-        _TrainRow(day=day, row=row, actual=actual, physical=physical)
-        for day in days
-        if day in prepared
-        for row, actual, physical in zip(
-            prepared[day].rows,
-            prepared[day].actuals,
-            prepared[day].pvlib_kwh or (None,) * len(prepared[day].rows),
-            strict=True,
-        )
-    ]
-    widest_fit: _FitSummary | None = None
-
-    prepared_days = [day for day in days if day in prepared]
-    folds = _fold_days(prepared_days, config)
+    every_row = training_rows(prepared, days)
+    widest_fit: FitSummary | None = None
+    folds = fold_days(prepared_days, config)
 
     # A window with too few days to train on reports its baselines and nothing else -- the case
     # `assert_baselines_exist_for_every_model` documents as legitimate. Two boundaries meet here and
@@ -292,7 +381,7 @@ def backtest(
     for fold_index, day in schedule:
         prepared_day = prepared[day]
         issue_ms = prepared_day.rows[0].issue_ms
-        day_hours = _hours_of_day(observations, day)
+        day_hours = hours_of_day(observations, day)
 
         # Every row whose actual had been observed by this fold's issue instant, resolved through
         # `is_observable` rather than re-derived here -- a second copy of that arithmetic is what
@@ -350,7 +439,7 @@ def _model_run(
     model_key: str,
     window_start: date,
     window_end: date,
-    fit: _FitSummary | None,
+    fit: FitSummary | None,
     feature_names: tuple[str, ...],
     predictions: Sequence[Prediction],
     config: ForecastConfig,
@@ -370,12 +459,12 @@ def _model_run(
         site=site.id,
         target=target,
         model_key=model_key,
-        role=_role_for(model_key, config.training_data_source),
+        role=role_for(model_key, config.training_data_source),
         window_start=window_start,
         window_end=window_end,
         train_start=train_start,
         train_end=train_end,
-        config_hash=_run_card(
+        config_hash=run_card(
             site, target, model_key, train_start, train_end, feature_names, config
         ).config_hash,
         n_train_rows=fit.n_rows if trains and fit else 0,
@@ -384,7 +473,7 @@ def _model_run(
     )
 
 
-def _run_card(
+def run_card(
     site: Site,
     target: str,
     model_key: str,
@@ -412,7 +501,7 @@ def _run_card(
     )
 
 
-def _physical_kwh(
+def physical_kwh(
     day_hours: Sequence[Observation],
     forecast: Mapping[int, Mapping[str, float | None]],
     site: Site,
@@ -442,12 +531,12 @@ def _physical_kwh(
     toy = physical.toy_ac_kwh(ghi, temp, pv)
     poa = physical.pvlib_ac_kwh(ghi, direct, diffuse, temp, wind, geometry, pv)
     return (
-        tuple(_none_if_nan(v) for v in toy),
-        tuple(_none_if_nan(v) for v in poa),
+        tuple(none_if_nan(v) for v in toy),
+        tuple(none_if_nan(v) for v in poa),
     )
 
 
-def _build_rows(
+def build_rows(
     day_hours: Sequence[Observation],
     forecast: Mapping[int, Mapping[str, float | None]],
     issue_ms: int,
@@ -502,23 +591,23 @@ def _build_rows(
                 ),
             )
         )
-        actuals.append(_target_value(observation, target))
+        actuals.append(target_value(observation, target))
     return rows, actuals
 
 
 def _predict_all(
     *,
     target: str,
-    day_data: _DayData,
+    day_data: DayData,
     day_hours: Sequence[Observation],
     issue_ms: int,
     history: Mapping[int, float | None],
     fold: int,
-    train: Sequence[_TrainRow],
+    train: Sequence[TrainRow],
     site: Site,
     config: ForecastConfig,
     baselines_only: bool = False,
-) -> tuple[dict[str, list[Prediction]], _FitSummary | None]:
+) -> tuple[dict[str, list[Prediction]], FitSummary | None]:
     """Every model's prediction for one target day, all against the same information set.
 
     Returns the fit summary alongside, so the caller records what was fitted rather than inferring
@@ -596,9 +685,9 @@ def _predict_all(
                 issue_ms=issue_ms,
                 vintage_issue_ms=vintage_ms,
                 fold=fold,
-                p10_kwh=_none_if_nan(quantiles[index][0]),
-                p50_kwh=_none_if_nan(quantiles[index][1]),
-                p90_kwh=_none_if_nan(quantiles[index][2]),
+                p10_kwh=none_if_nan(quantiles[index][0]),
+                p50_kwh=none_if_nan(quantiles[index][1]),
+                p90_kwh=none_if_nan(quantiles[index][2]),
                 actual_kwh=actual,
             )
             for index, (row, observation, actual) in enumerate(
@@ -608,40 +697,43 @@ def _predict_all(
     return out, fit
 
 
-def _fit_and_predict(
-    rows: Sequence[FeatureRow],
-    train: Sequence[_TrainRow],
-    physical_baseline: Sequence[float | None] | None,
+def fit_model(
+    train: Sequence[TrainRow],
+    *,
+    residual: bool,
     config: ForecastConfig,
     site: Site,
     target: str,
     model_key: str,
-) -> tuple[NDArray[np.float64] | None, _FitSummary | None]:
-    """Fit on the observable history and predict this day, or ``(None, None)`` with nothing to fit.
+) -> tuple[QuantileForecaster, FitSummary] | None:
+    """Fit one model on the observable history, or ``None`` when there is not enough to fit.
 
-    For PV the model learns the *residual* against the physical chain rather than the level, which
-    is the classic hybrid: physics supplies the shape, boosting supplies the correction. On
-    synthetic windows that correction is largely the plane-of-array transposition the truth model
-    never had -- which is real signal about this simulator and no signal at all about a real roof.
-    That is the whole basis of the provenance interlock in ``models.load_artifact``, so the residual
-    has to be what is actually fitted: a level model wearing the label would make the interlock's
-    refusal a superstition rather than a safeguard. The fit itself is not persisted -- every fold
-    refits from scratch, which is what keeps the expanding window honest -- so the interlock guards
-    the serving path rather than this one.
+    For PV ``residual`` is true and the model learns the *residual* against the physical chain
+    rather than the level, which is the classic hybrid: physics supplies the shape, boosting
+    supplies the correction. On synthetic windows that correction is largely the plane-of-array
+    transposition the truth model never had -- real signal about this simulator and no signal at all
+    about a real roof. That is the whole basis of the provenance interlock in
+    ``models.load_artifact``, so the residual has to be what is actually fitted: a level model
+    wearing the label would make the interlock's refusal a superstition rather than a safeguard.
 
     A training row whose physical baseline is missing is dropped rather than fitted at its level --
-    an undefined residual is not a zero one -- and a *predicted* hour with no baseline comes back
-    ``NaN`` and is reported as no prediction.
+    an undefined residual is not a zero one.
 
     The returned summary counts the rows that survived those drops, which is what the caller writes
     to ``derived.forecast_runs``: reporting the candidate pool instead would overstate the fit by
     every gap in the window.
+
+    Separated from prediction because the two consumers need them at different cadences. The
+    backtest refits every fold and predicts one day, which is what keeps the expanding window
+    honest. M8's serving path fits once per fold and then predicts every day until the next one,
+    because that is what a household actually has -- a model trained at some point in the past,
+    used until it is retrained. One fitting convention, two schedules.
     """
-    labelled: list[tuple[_TrainRow, float]] = []
+    labelled: list[tuple[TrainRow, float]] = []
     for candidate in train:
         if candidate.actual is None:
             continue
-        if physical_baseline is None:
+        if not residual:
             label = candidate.actual
         elif candidate.physical is not None:
             label = candidate.actual - candidate.physical
@@ -652,26 +744,75 @@ def _fit_and_predict(
         if np.isfinite(label):
             labelled.append((candidate, label))
     if len(labelled) < len(QUANTILES) * 10:
-        return None, None
+        return None
 
-    fit = _FitSummary(
+    fit = FitSummary(
         n_rows=len(labelled),
         start=min(candidate.day for candidate, _ in labelled),
         end=max(candidate.day for candidate, _ in labelled),
     )
-    _, train_matrix = build_matrix([candidate.row for candidate, _ in labelled])
+    names, train_matrix = build_matrix([candidate.row for candidate, _ in labelled])
     train_target = np.array([label for _, label in labelled], dtype=np.float64)
-    names, predict_matrix = build_matrix(list(rows))
+    card = run_card(site, target, model_key, fit.start, fit.end, names, config)
+    return fit_quantile_forecaster(train_matrix, train_target, card), fit
 
-    card = _run_card(site, target, model_key, fit.start, fit.end, names, config)
-    forecaster = fit_quantile_forecaster(train_matrix, train_target, card)
-    predicted = forecaster.predict(predict_matrix)
+
+def predict_rows(
+    forecaster: QuantileForecaster,
+    rows: Sequence[FeatureRow],
+    physical_baseline: Sequence[float | None] | None,
+) -> NDArray[np.float64]:
+    """Predict one day's rows, adding the physical baseline back for a residual model.
+
+    A *predicted* hour whose baseline is missing comes back ``NaN`` and is reported as no
+    prediction, which is the same "gap is a gap" rule the feature matrix follows.
+
+    The column check is the one thing this adds over calling ``predict`` directly, and it is worth
+    the line: train and predict matrices are built by separate ``build_matrix`` calls, so a column
+    set that drifted between fitting and serving would not raise anywhere -- the model would simply
+    read each feature as a different feature and return confident nonsense. That failure is
+    unreachable inside a single backtest, where both come from the same ``build_rows``; it becomes
+    reachable the moment an artifact outlives the process that fitted it, which is exactly what the
+    serving path does.
+    """
+    names, matrix = build_matrix(list(rows))
+    if names != forecaster.card.feature_names:
+        raise ValueError(
+            f"{forecaster.card.model_key} was fitted on {len(forecaster.card.feature_names)} "
+            f"features and asked to predict {len(names)}; the column sets differ at "
+            f"{sorted(set(names) ^ set(forecaster.card.feature_names))}"
+        )
+    predicted = forecaster.predict(matrix)
     if physical_baseline is None:
-        return predicted, fit
+        return predicted
     baseline = np.array(
         [np.nan if value is None else value for value in physical_baseline], dtype=np.float64
     )
-    return predicted + baseline[:, None], fit
+    return predicted + baseline[:, None]
+
+
+def _fit_and_predict(
+    rows: Sequence[FeatureRow],
+    train: Sequence[TrainRow],
+    physical_baseline: Sequence[float | None] | None,
+    config: ForecastConfig,
+    site: Site,
+    target: str,
+    model_key: str,
+) -> tuple[NDArray[np.float64] | None, FitSummary | None]:
+    """One fold: fit on the observable history and predict this day."""
+    fitted = fit_model(
+        train,
+        residual=physical_baseline is not None,
+        config=config,
+        site=site,
+        target=target,
+        model_key=model_key,
+    )
+    if fitted is None:
+        return None, None
+    forecaster, fit = fitted
+    return predict_rows(forecaster, rows, physical_baseline), fit
 
 
 def _weather(forecast: Mapping[int, Mapping[str, float | None]], ts_ms: int, name: str) -> float:
@@ -679,7 +820,7 @@ def _weather(forecast: Mapping[int, Mapping[str, float | None]], ts_ms: int, nam
     return float("nan") if value is None else value
 
 
-def _none_if_nan(value: float) -> float | None:
+def none_if_nan(value: float) -> float | None:
     return None if not np.isfinite(value) else float(value)
 
 

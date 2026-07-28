@@ -89,10 +89,16 @@ energy-platform/
 - Backtesting harness with expanding-window time-series CV; strict no-lookahead feature construction; MAE + pinball loss, evaluated in a dbt mart
 - **Done when:** both models beat their naive baselines out-of-sample and the eval lives in the warehouse, not a notebook.
 
-### M8 — Forward-looking dispatch
-- Run the optimizer on forecasts instead of actuals (rolling daily horizon)
-- Report regret: forecast-driven dispatch cost vs hindsight-optimal vs naive
+### M8 — Forward-looking dispatch ✅
+- Run the optimizer on forecasts instead of actuals (rolling daily horizon), then **execute the plan
+  against actuals** under an explicit recourse policy, chaining SoC along the executed trajectory
+- Report regret: forecast-driven dispatch cost vs hindsight-optimal vs naive, in
+  `mart_dispatch_regret`, with regret split into forecast error and day-ahead myopia
 - **Done when:** the three-way comparison chart exists — this is the single most impressive figure in the project.
+- **Landed:** the chart exists and the headline is *negative* — on synthetic data forecast-driven
+  dispatch captures −965% of a €0.29 prize. The decomposition is what makes that a finding rather
+  than a failure: a perfect-forecast day-ahead planner captures only 6.7%, so the value is
+  structurally out of reach of a daily horizon, not lost to model error.
 
 ### M9 — Dashboard + README polish
 - Streamlit pages: live overview, economics, optimizer comparison, forecast quality

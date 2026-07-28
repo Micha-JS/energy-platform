@@ -15,16 +15,15 @@
 
   The expectation must come from the calendar and never from the rows: an expectation counted from
   the data under test shrinks in lockstep with a truncated window and passes by silence.
+
+  The hour arithmetic itself lives in berlin_span_hours, shared with M8's simulated spans.
 #}
 {% macro declared_coverage_windows() %}
     {%- set coverage = var('coverage_windows') -%}
     select
         start_date as window_start,
         end_date   as window_end,
-        (extract(epoch from (
-            ((end_date + 1)::timestamp at time zone 'Europe/Berlin')
-            - (start_date::timestamp at time zone 'Europe/Berlin')
-        )) / 3600)::int as expected_hours
+        {{ berlin_span_hours('start_date', 'end_date') }} as expected_hours
     from (values
         {%- for w in coverage %}
         (date '{{ w.start }}', date '{{ w.end }}'){{ "," if not loop.last }}

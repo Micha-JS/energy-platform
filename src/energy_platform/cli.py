@@ -19,6 +19,11 @@ range precisely because it can only ever run retrospectively, and it is never sc
 writes the four scenarios to the derived zone. Unlike the two above it reads a *mart* rather than
 the raw zone, so it runs after ``dbt build`` and before the dispatch mart is built -- see the
 justfile and the CI dbt job for the ordering.
+
+``energy-platform forward-dispatch`` is M8: it rolls each window forward day by day, planning every
+Berlin day's battery schedule from the forecasts available at that day's decision time and then
+executing that plan against what actually happened. It is the last step of the sandwich, after
+``forecast``, because it consumes both the energy mart and the weather vintages.
 """
 
 from __future__ import annotations
@@ -33,6 +38,7 @@ from collections.abc import Iterator, Sequence
 from contextlib import ExitStack
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -63,6 +69,7 @@ from energy_platform.connectors.synthetic_forecast import (
 )
 from energy_platform.connectors.types import Dataset, Resolution
 from energy_platform.dispatch import runner
+from energy_platform.dispatch.model import Scenario
 from energy_platform.dispatch.optimizer import DispatchError, solver_version
 from energy_platform.dispatch.store import DispatchInputError, DispatchRepository
 from energy_platform.dispatch.windows import CoverageWindow, load_coverage_windows
@@ -76,6 +83,12 @@ from energy_platform.orchestration.ingest import (
 from energy_platform.orchestration.partition_config import PARTITION_TIMEZONE
 from energy_platform.orchestration.raw_zone import RawZoneRepository, WriteOutcome
 from energy_platform.tariffs.catalog import TariffSpec, load_catalog, resolve
+
+if TYPE_CHECKING:
+    # Type-only. `dispatch.forward` reaches the forecasting package and therefore the scientific
+    # stack, so importing it at runtime here would break the containment claim
+    # tests/test_import_containment.py makes about the CLI.
+    from energy_platform.dispatch.forward import ForwardSolution
 
 logger = logging.getLogger("energy_platform.backfill")
 
@@ -154,6 +167,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_forecast(args)
     if args.command == "dispatch":
         return _run_dispatch(args)
+    if args.command == "forward-dispatch":
+        return _run_forward_dispatch(args)
     parser.print_help()
     return 1
 
@@ -335,6 +350,43 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Site id to solve for (default: every site the energy mart holds in the window).",
     )
     dispatch.add_argument(
+        "--tariff",
+        dest="tariffs",
+        default=None,
+        help="Comma-separated consumption tariff ids (default: every static/dynamic row in the "
+        "catalogue).",
+    )
+
+    forward = sub.add_parser(
+        "forward-dispatch",
+        help="Roll the day-ahead simulation forward: plan on forecasts, execute against actuals.",
+    )
+    forward.add_argument(
+        "--from",
+        dest="from_date",
+        default=None,
+        type=date.fromisoformat,
+        metavar="YYYY-MM-DD",
+        help="Simulate this ad-hoc window instead of the declared ones (requires --to). Reported "
+        "but NOT written, for the same reason `dispatch --from` is not: the derived tables hold "
+        "the declared windows and nothing else, so a stray row would fail "
+        "assert_forward_dispatch_windows_are_declared on every later build with no command that "
+        "removes it.",
+    )
+    forward.add_argument(
+        "--to",
+        dest="to_date",
+        default=None,
+        type=date.fromisoformat,
+        metavar="YYYY-MM-DD",
+        help="Last Europe/Berlin day of the ad-hoc window (inclusive). Requires --from.",
+    )
+    forward.add_argument(
+        "--site",
+        default=None,
+        help="Site id to simulate (default: the configured default site).",
+    )
+    forward.add_argument(
         "--tariff",
         dest="tariffs",
         default=None,
@@ -889,6 +941,166 @@ def _run_dispatch(args: argparse.Namespace) -> int:
         " (nothing persisted -- ad-hoc window)" if ad_hoc else "",
     )
     return 1 if failures else 0
+
+
+def _run_forward_dispatch(args: argparse.Namespace) -> int:
+    """Roll the day-ahead simulation over each declared window and replace its rows.
+
+    Reads the same ``mart_hourly_energy`` the optimiser does, plus the forecasting store's
+    observations and vintages, so it runs in the same dbt -> python -> dbt sandwich and after
+    ``forecast``. Like the other two commands, an ad-hoc ``--from/--to`` window is simulated and
+    reported but never written.
+
+    The forecasting package is imported *here* rather than at module level, exactly as
+    ``_run_forecast`` does it: it pulls numpy, pandas, scipy, pvlib and scikit-learn, and
+    ``tests/test_import_containment.py`` asserts that importing the CLI does not.
+    """
+    from energy_platform.dispatch.forward import NotSimulated, simulate
+    from energy_platform.dispatch.forward_store import ForwardDispatchRepository
+    from energy_platform.forecasting.serving import serve_window
+    from energy_platform.forecasting.store import ForecastRepository
+
+    config = AppConfig.from_env()
+    site_id = args.site or config.site.default_id
+    site = config.site.resolve(site_id)
+    try:
+        windows = _dispatch_windows(args)
+        specs, feed_in = _dispatch_tariffs(args, config)
+    except (ValueError, KeyError, FileNotFoundError) as exc:
+        raise SystemExit(str(exc)) from exc
+
+    ad_hoc = args.from_date is not None
+    if ad_hoc:
+        logger.info("AD-HOC WINDOW -- simulated and reported, NOT persisted.")
+
+    logger.info(
+        "Simulating %d window(s) for site %s under %d tariff(s) %s | decision D 00:00 Europe/"
+        "Berlin, refit every %dd after %dd warm-up",
+        len(windows),
+        site_id,
+        len(specs),
+        ", ".join(spec.tariff_id for spec in specs),
+        config.forecast.fold_stride_days,
+        config.forecast.min_train_days,
+    )
+
+    version = solver_version()
+    simulated = markers = failures = 0
+    with psycopg.connect(config.postgres.dsn) as conn:
+        dispatch_repo = DispatchRepository(
+            conn,
+            derived_schema=config.postgres.derived_schema,
+            marts_schema=config.postgres.marts_schema,
+        )
+        forecast_repo = ForecastRepository(
+            conn,
+            derived_schema=config.postgres.derived_schema,
+            marts_schema=config.postgres.marts_schema,
+            staging_schema=config.postgres.staging_schema,
+        )
+        forward_repo = ForwardDispatchRepository(
+            conn, derived_schema=config.postgres.derived_schema
+        )
+        if not ad_hoc:
+            forward_repo.ensure_schema()
+        if not dispatch_repo.input_relation_exists():
+            raise SystemExit(
+                f"{config.postgres.marts_schema}.mart_hourly_energy does not exist; run "
+                "`just dbt-build` before `just forward-dispatch`"
+            )
+
+        for window in windows:
+            observations = forecast_repo.read_observations(window.start, window.end, site_id)
+            vintages = forecast_repo.read_vintages(
+                site_id, config.forecast.forecast_source, window.start, window.end
+            )
+            # Both targets are served before any tariff is simulated: the forecasts do not depend
+            # on the tariff, and fitting them once per tariff would refit the same models N times
+            # and -- worse -- invite the two to disagree about which model planned a day.
+            plans = {
+                target: serve_window(
+                    site,
+                    target,
+                    window.start,
+                    window.end,
+                    observations,
+                    vintages,
+                    config=config.forecast,
+                    pv=config.pv,
+                )
+                for target in ("pv_production_kwh", "household_load_kwh")
+            }
+            for spec in specs:
+                try:
+                    hours = dispatch_repo.read_window(window, site_id)
+                    outcome = simulate(
+                        window,
+                        site_id,
+                        hours,
+                        spec,
+                        feed_in,
+                        config.battery,
+                        pv_plan=plans["pv_production_kwh"],
+                        load_plan=plans["household_load_kwh"],
+                        terminal_override_ct_kwh=runner.terminal_value_override(),
+                        planning_continuation_ct_kwh=runner.continuation_value_override(),
+                    )
+                    if not ad_hoc:
+                        forward_repo.replace_window(
+                            outcome,
+                            config.battery,
+                            version,
+                            config.forecast.training_data_source,
+                        )
+                except (DispatchError, DispatchInputError):
+                    failures += 1
+                    logger.exception(
+                        "Failed to simulate %s %s under %s", window, site_id, spec.tariff_id
+                    )
+                    continue
+                if isinstance(outcome, NotSimulated):
+                    markers += 1
+                    logger.warning("  %s %s: not simulated (%s)", window, site_id, outcome.reason)
+                    # The reason is about the models, not the money, so it is the same for every
+                    # tariff and is recorded once rather than once per tariff.
+                    break
+                simulated += 1
+                _log_forward(outcome)
+
+    logger.info(
+        "Done. simulated=%d not_simulated=%d failures=%d solver=highs/%s%s",
+        simulated,
+        markers,
+        failures,
+        version,
+        " (nothing persisted -- ad-hoc window)" if ad_hoc else "",
+    )
+    return 1 if failures else 0
+
+
+def _log_forward(solution: ForwardSolution) -> None:
+    """One line per simulated (window, site, tariff): the three costs and the share captured."""
+    naive = solution.result(Scenario.NAIVE_CONTINUOUS).objective_eur
+    forecast_driven = solution.result(Scenario.FORECAST_DRIVEN).objective_eur
+    hindsight = solution.result(Scenario.OPTIMAL).objective_eur
+    available = naive - hindsight
+    share = f"{(naive - forecast_driven) / available:.1%}" if available > 1e-6 else "n/a"
+    logger.info(
+        "  %s..%s %s %s: naive %+.2f | forecast-driven %+.2f | hindsight %+.2f => regret %.4f, "
+        "captured %s (%d days, %d fallback, %d clipped hours)",
+        solution.sim_start,
+        solution.sim_end,
+        solution.region,
+        solution.tariff_id,
+        naive,
+        forecast_driven,
+        hindsight,
+        forecast_driven - hindsight,
+        share,
+        solution.simulated_days,
+        solution.fallback_days,
+        solution.execution.clipped_hours,
+    )
 
 
 def _log_solution(

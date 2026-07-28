@@ -68,3 +68,31 @@ sources:
           One row per (run, hour): p10/p50/p90 and the actual, with the issue instant and the
           vintage the features came from. Null where a model made no prediction or no actual
           exists -- a gap is never scored as a zero.
+      - name: forward_dispatch_runs
+        description: >
+          M8's three-way comparison, one row per (region, window, tariff, scenario) over the
+          SIMULATED SPAN -- which is generally shorter than the declared window, because the
+          forecast models need warm-up before anything can be planned, and is therefore recorded
+          as its own sim_start/sim_end rather than inferred from the window.
+
+          A declared window that could not be simulated at all is still written, with
+          is_simulated = false and a not_simulated_reason, under the sentinel tariff_id '*'. That
+          is deliberate: a window that simply vanished would let every coverage test downstream
+          pass over something nobody could see was absent.
+
+          Carries the rule ids the simulation ran under -- the decision time, the day-ahead price
+          publication rule and M7's vintage selection rule -- so a stored result names its own
+          rules rather than relying on a docstring having said the same thing at the time.
+      - name: forward_dispatch_days
+        description: >
+          The rolling structure, one row per (run, Berlin day): the state-of-charge chain along the
+          EXECUTED trajectory, whether the day was planned or fell back to naive self-consumption,
+          how many hours the plan had to be clipped to stay feasible, and the day's settled money.
+          Only the forecast_driven scenario has a plan and a decision time; the two reference
+          scenarios carry plan_status = 'not_planned' rather than a guess.
+      - name: forward_dispatch_schedule
+        description: >
+          The hourly executed flows, with the PLANNED battery legs beside them and a was_clipped
+          flag, so plan-versus-reality is inspectable rather than something the reader has to take
+          on faith. Planned columns are null for the two reference scenarios, which were never
+          planned.
