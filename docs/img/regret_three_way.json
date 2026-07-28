@@ -1,0 +1,3406 @@
+{
+  "daily": [
+    {
+      "cumulative_net_cost_eur": -1.124069,
+      "local_date": "2024-05-02",
+      "scenario": "forecast_driven",
+      "sim_day": 1,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -3.344398,
+      "local_date": "2024-05-03",
+      "scenario": "forecast_driven",
+      "sim_day": 2,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -5.121503,
+      "local_date": "2024-05-04",
+      "scenario": "forecast_driven",
+      "sim_day": 3,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -6.662303,
+      "local_date": "2024-05-05",
+      "scenario": "forecast_driven",
+      "sim_day": 4,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -9.145302,
+      "local_date": "2024-05-06",
+      "scenario": "forecast_driven",
+      "sim_day": 5,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -10.358262999999999,
+      "local_date": "2024-05-07",
+      "scenario": "forecast_driven",
+      "sim_day": 6,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -13.128554,
+      "local_date": "2024-05-08",
+      "scenario": "forecast_driven",
+      "sim_day": 7,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -16.32253,
+      "local_date": "2024-05-09",
+      "scenario": "forecast_driven",
+      "sim_day": 8,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -18.350808,
+      "local_date": "2024-05-10",
+      "scenario": "forecast_driven",
+      "sim_day": 9,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -20.337325,
+      "local_date": "2024-05-11",
+      "scenario": "forecast_driven",
+      "sim_day": 10,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -23.170022,
+      "local_date": "2024-05-12",
+      "scenario": "forecast_driven",
+      "sim_day": 11,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -26.462635,
+      "local_date": "2024-05-13",
+      "scenario": "forecast_driven",
+      "sim_day": 12,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -29.692266999999998,
+      "local_date": "2024-05-14",
+      "scenario": "forecast_driven",
+      "sim_day": 13,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -32.848836,
+      "local_date": "2024-05-15",
+      "scenario": "forecast_driven",
+      "sim_day": 14,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -35.525238,
+      "local_date": "2024-05-16",
+      "scenario": "forecast_driven",
+      "sim_day": 15,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -38.45342,
+      "local_date": "2024-05-17",
+      "scenario": "forecast_driven",
+      "sim_day": 16,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -40.449861,
+      "local_date": "2024-05-18",
+      "scenario": "forecast_driven",
+      "sim_day": 17,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -42.398482,
+      "local_date": "2024-05-19",
+      "scenario": "forecast_driven",
+      "sim_day": 18,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -44.328757,
+      "local_date": "2024-05-20",
+      "scenario": "forecast_driven",
+      "sim_day": 19,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -46.994741000000005,
+      "local_date": "2024-05-21",
+      "scenario": "forecast_driven",
+      "sim_day": 20,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -48.599982000000004,
+      "local_date": "2024-05-22",
+      "scenario": "forecast_driven",
+      "sim_day": 21,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -50.753901000000006,
+      "local_date": "2024-05-23",
+      "scenario": "forecast_driven",
+      "sim_day": 22,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -53.02713800000001,
+      "local_date": "2024-05-24",
+      "scenario": "forecast_driven",
+      "sim_day": 23,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -55.45656900000001,
+      "local_date": "2024-05-25",
+      "scenario": "forecast_driven",
+      "sim_day": 24,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -57.89868700000001,
+      "local_date": "2024-05-26",
+      "scenario": "forecast_driven",
+      "sim_day": 25,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -59.69488900000001,
+      "local_date": "2024-05-27",
+      "scenario": "forecast_driven",
+      "sim_day": 26,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -60.85700500000001,
+      "local_date": "2024-05-28",
+      "scenario": "forecast_driven",
+      "sim_day": 27,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -63.43399500000001,
+      "local_date": "2024-05-29",
+      "scenario": "forecast_driven",
+      "sim_day": 28,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -65.228029,
+      "local_date": "2024-05-30",
+      "scenario": "forecast_driven",
+      "sim_day": 29,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -67.95673900000001,
+      "local_date": "2024-05-31",
+      "scenario": "forecast_driven",
+      "sim_day": 30,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -71.01662400000001,
+      "local_date": "2024-06-01",
+      "scenario": "forecast_driven",
+      "sim_day": 31,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -73.30449100000001,
+      "local_date": "2024-06-02",
+      "scenario": "forecast_driven",
+      "sim_day": 32,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -74.41614400000002,
+      "local_date": "2024-06-03",
+      "scenario": "forecast_driven",
+      "sim_day": 33,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -76.38069000000002,
+      "local_date": "2024-06-04",
+      "scenario": "forecast_driven",
+      "sim_day": 34,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -78.59666700000001,
+      "local_date": "2024-06-05",
+      "scenario": "forecast_driven",
+      "sim_day": 35,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -81.65300300000001,
+      "local_date": "2024-06-06",
+      "scenario": "forecast_driven",
+      "sim_day": 36,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -84.56301700000002,
+      "local_date": "2024-06-07",
+      "scenario": "forecast_driven",
+      "sim_day": 37,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -87.42519000000001,
+      "local_date": "2024-06-08",
+      "scenario": "forecast_driven",
+      "sim_day": 38,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -90.68407100000002,
+      "local_date": "2024-06-09",
+      "scenario": "forecast_driven",
+      "sim_day": 39,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -92.61190800000001,
+      "local_date": "2024-06-10",
+      "scenario": "forecast_driven",
+      "sim_day": 40,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -94.77118900000002,
+      "local_date": "2024-06-11",
+      "scenario": "forecast_driven",
+      "sim_day": 41,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -97.46033300000002,
+      "local_date": "2024-06-12",
+      "scenario": "forecast_driven",
+      "sim_day": 42,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -100.54558600000001,
+      "local_date": "2024-06-13",
+      "scenario": "forecast_driven",
+      "sim_day": 43,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -101.73001300000001,
+      "local_date": "2024-06-14",
+      "scenario": "forecast_driven",
+      "sim_day": 44,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -103.38841900000001,
+      "local_date": "2024-06-15",
+      "scenario": "forecast_driven",
+      "sim_day": 45,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -106.30138500000001,
+      "local_date": "2024-06-16",
+      "scenario": "forecast_driven",
+      "sim_day": 46,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -109.11809000000001,
+      "local_date": "2024-06-17",
+      "scenario": "forecast_driven",
+      "sim_day": 47,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -111.81679100000001,
+      "local_date": "2024-06-18",
+      "scenario": "forecast_driven",
+      "sim_day": 48,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -112.68017700000001,
+      "local_date": "2024-06-19",
+      "scenario": "forecast_driven",
+      "sim_day": 49,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -115.75692700000002,
+      "local_date": "2024-06-20",
+      "scenario": "forecast_driven",
+      "sim_day": 50,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -117.49696200000002,
+      "local_date": "2024-06-21",
+      "scenario": "forecast_driven",
+      "sim_day": 51,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -119.48379300000002,
+      "local_date": "2024-06-22",
+      "scenario": "forecast_driven",
+      "sim_day": 52,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -121.78379800000002,
+      "local_date": "2024-06-23",
+      "scenario": "forecast_driven",
+      "sim_day": 53,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -124.53677400000002,
+      "local_date": "2024-06-24",
+      "scenario": "forecast_driven",
+      "sim_day": 54,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -127.28247600000002,
+      "local_date": "2024-06-25",
+      "scenario": "forecast_driven",
+      "sim_day": 55,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -130.60983700000003,
+      "local_date": "2024-06-26",
+      "scenario": "forecast_driven",
+      "sim_day": 56,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -133.04059100000003,
+      "local_date": "2024-06-27",
+      "scenario": "forecast_driven",
+      "sim_day": 57,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -135.80891700000004,
+      "local_date": "2024-06-28",
+      "scenario": "forecast_driven",
+      "sim_day": 58,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -139.09649600000003,
+      "local_date": "2024-06-29",
+      "scenario": "forecast_driven",
+      "sim_day": 59,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -141.13840300000004,
+      "local_date": "2024-06-30",
+      "scenario": "forecast_driven",
+      "sim_day": 60,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -1.204217,
+      "local_date": "2024-05-02",
+      "scenario": "naive_continuous",
+      "sim_day": 1,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -3.459841,
+      "local_date": "2024-05-03",
+      "scenario": "naive_continuous",
+      "sim_day": 2,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -5.313689,
+      "local_date": "2024-05-04",
+      "scenario": "naive_continuous",
+      "sim_day": 3,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -6.874917,
+      "local_date": "2024-05-05",
+      "scenario": "naive_continuous",
+      "sim_day": 4,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -9.345746,
+      "local_date": "2024-05-06",
+      "scenario": "naive_continuous",
+      "sim_day": 5,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -10.609084,
+      "local_date": "2024-05-07",
+      "scenario": "naive_continuous",
+      "sim_day": 6,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -13.366033,
+      "local_date": "2024-05-08",
+      "scenario": "naive_continuous",
+      "sim_day": 7,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -16.573817,
+      "local_date": "2024-05-09",
+      "scenario": "naive_continuous",
+      "sim_day": 8,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -18.751181,
+      "local_date": "2024-05-10",
+      "scenario": "naive_continuous",
+      "sim_day": 9,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -20.741546,
+      "local_date": "2024-05-11",
+      "scenario": "naive_continuous",
+      "sim_day": 10,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -23.605726999999998,
+      "local_date": "2024-05-12",
+      "scenario": "naive_continuous",
+      "sim_day": 11,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -26.892563999999997,
+      "local_date": "2024-05-13",
+      "scenario": "naive_continuous",
+      "sim_day": 12,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -30.134760999999997,
+      "local_date": "2024-05-14",
+      "scenario": "naive_continuous",
+      "sim_day": 13,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -33.326260999999995,
+      "local_date": "2024-05-15",
+      "scenario": "naive_continuous",
+      "sim_day": 14,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -36.017112999999995,
+      "local_date": "2024-05-16",
+      "scenario": "naive_continuous",
+      "sim_day": 15,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -38.958924999999994,
+      "local_date": "2024-05-17",
+      "scenario": "naive_continuous",
+      "sim_day": 16,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -41.050250999999996,
+      "local_date": "2024-05-18",
+      "scenario": "naive_continuous",
+      "sim_day": 17,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -43.14010699999999,
+      "local_date": "2024-05-19",
+      "scenario": "naive_continuous",
+      "sim_day": 18,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -45.060807999999994,
+      "local_date": "2024-05-20",
+      "scenario": "naive_continuous",
+      "sim_day": 19,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -47.785948999999995,
+      "local_date": "2024-05-21",
+      "scenario": "naive_continuous",
+      "sim_day": 20,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -49.529174999999995,
+      "local_date": "2024-05-22",
+      "scenario": "naive_continuous",
+      "sim_day": 21,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -51.85889999999999,
+      "local_date": "2024-05-23",
+      "scenario": "naive_continuous",
+      "sim_day": 22,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -54.21385599999999,
+      "local_date": "2024-05-24",
+      "scenario": "naive_continuous",
+      "sim_day": 23,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -56.85039799999999,
+      "local_date": "2024-05-25",
+      "scenario": "naive_continuous",
+      "sim_day": 24,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -59.35313599999999,
+      "local_date": "2024-05-26",
+      "scenario": "naive_continuous",
+      "sim_day": 25,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -61.179238999999995,
+      "local_date": "2024-05-27",
+      "scenario": "naive_continuous",
+      "sim_day": 26,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -62.36563399999999,
+      "local_date": "2024-05-28",
+      "scenario": "naive_continuous",
+      "sim_day": 27,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -65.043078,
+      "local_date": "2024-05-29",
+      "scenario": "naive_continuous",
+      "sim_day": 28,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -66.911515,
+      "local_date": "2024-05-30",
+      "scenario": "naive_continuous",
+      "sim_day": 29,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -69.628419,
+      "local_date": "2024-05-31",
+      "scenario": "naive_continuous",
+      "sim_day": 30,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -72.689285,
+      "local_date": "2024-06-01",
+      "scenario": "naive_continuous",
+      "sim_day": 31,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -74.98736099999999,
+      "local_date": "2024-06-02",
+      "scenario": "naive_continuous",
+      "sim_day": 32,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -76.23064099999999,
+      "local_date": "2024-06-03",
+      "scenario": "naive_continuous",
+      "sim_day": 33,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -78.25214799999999,
+      "local_date": "2024-06-04",
+      "scenario": "naive_continuous",
+      "sim_day": 34,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -80.484038,
+      "local_date": "2024-06-05",
+      "scenario": "naive_continuous",
+      "sim_day": 35,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -83.529414,
+      "local_date": "2024-06-06",
+      "scenario": "naive_continuous",
+      "sim_day": 36,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -86.438742,
+      "local_date": "2024-06-07",
+      "scenario": "naive_continuous",
+      "sim_day": 37,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -89.329525,
+      "local_date": "2024-06-08",
+      "scenario": "naive_continuous",
+      "sim_day": 38,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -92.583338,
+      "local_date": "2024-06-09",
+      "scenario": "naive_continuous",
+      "sim_day": 39,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -94.737172,
+      "local_date": "2024-06-10",
+      "scenario": "naive_continuous",
+      "sim_day": 40,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -96.928467,
+      "local_date": "2024-06-11",
+      "scenario": "naive_continuous",
+      "sim_day": 41,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -99.64900899999999,
+      "local_date": "2024-06-12",
+      "scenario": "naive_continuous",
+      "sim_day": 42,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -102.69373599999999,
+      "local_date": "2024-06-13",
+      "scenario": "naive_continuous",
+      "sim_day": 43,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -103.90363099999999,
+      "local_date": "2024-06-14",
+      "scenario": "naive_continuous",
+      "sim_day": 44,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -105.599746,
+      "local_date": "2024-06-15",
+      "scenario": "naive_continuous",
+      "sim_day": 45,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -108.51004499999999,
+      "local_date": "2024-06-16",
+      "scenario": "naive_continuous",
+      "sim_day": 46,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -111.336642,
+      "local_date": "2024-06-17",
+      "scenario": "naive_continuous",
+      "sim_day": 47,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -114.081245,
+      "local_date": "2024-06-18",
+      "scenario": "naive_continuous",
+      "sim_day": 48,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -115.147566,
+      "local_date": "2024-06-19",
+      "scenario": "naive_continuous",
+      "sim_day": 49,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -118.291947,
+      "local_date": "2024-06-20",
+      "scenario": "naive_continuous",
+      "sim_day": 50,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -120.083427,
+      "local_date": "2024-06-21",
+      "scenario": "naive_continuous",
+      "sim_day": 51,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -122.077305,
+      "local_date": "2024-06-22",
+      "scenario": "naive_continuous",
+      "sim_day": 52,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -124.421129,
+      "local_date": "2024-06-23",
+      "scenario": "naive_continuous",
+      "sim_day": 53,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -127.162487,
+      "local_date": "2024-06-24",
+      "scenario": "naive_continuous",
+      "sim_day": 54,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -130.03466,
+      "local_date": "2024-06-25",
+      "scenario": "naive_continuous",
+      "sim_day": 55,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -133.338259,
+      "local_date": "2024-06-26",
+      "scenario": "naive_continuous",
+      "sim_day": 56,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -135.781811,
+      "local_date": "2024-06-27",
+      "scenario": "naive_continuous",
+      "sim_day": 57,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -138.549194,
+      "local_date": "2024-06-28",
+      "scenario": "naive_continuous",
+      "sim_day": 58,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -141.855477,
+      "local_date": "2024-06-29",
+      "scenario": "naive_continuous",
+      "sim_day": 59,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -143.97702700000002,
+      "local_date": "2024-06-30",
+      "scenario": "naive_continuous",
+      "sim_day": 60,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -2.093289,
+      "local_date": "2024-05-02",
+      "scenario": "optimal",
+      "sim_day": 1,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -4.320437,
+      "local_date": "2024-05-03",
+      "scenario": "optimal",
+      "sim_day": 2,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -6.168517,
+      "local_date": "2024-05-04",
+      "scenario": "optimal",
+      "sim_day": 3,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -7.747406999999999,
+      "local_date": "2024-05-05",
+      "scenario": "optimal",
+      "sim_day": 4,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -10.246713,
+      "local_date": "2024-05-06",
+      "scenario": "optimal",
+      "sim_day": 5,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -11.466169,
+      "local_date": "2024-05-07",
+      "scenario": "optimal",
+      "sim_day": 6,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -14.275021,
+      "local_date": "2024-05-08",
+      "scenario": "optimal",
+      "sim_day": 7,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -17.449166,
+      "local_date": "2024-05-09",
+      "scenario": "optimal",
+      "sim_day": 8,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -19.604562,
+      "local_date": "2024-05-10",
+      "scenario": "optimal",
+      "sim_day": 9,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -21.629629,
+      "local_date": "2024-05-11",
+      "scenario": "optimal",
+      "sim_day": 10,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -23.958766,
+      "local_date": "2024-05-12",
+      "scenario": "optimal",
+      "sim_day": 11,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -27.496832,
+      "local_date": "2024-05-13",
+      "scenario": "optimal",
+      "sim_day": 12,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -30.982509,
+      "local_date": "2024-05-14",
+      "scenario": "optimal",
+      "sim_day": 13,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -34.253038000000004,
+      "local_date": "2024-05-15",
+      "scenario": "optimal",
+      "sim_day": 14,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -36.931274,
+      "local_date": "2024-05-16",
+      "scenario": "optimal",
+      "sim_day": 15,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -39.865805,
+      "local_date": "2024-05-17",
+      "scenario": "optimal",
+      "sim_day": 16,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -41.930044,
+      "local_date": "2024-05-18",
+      "scenario": "optimal",
+      "sim_day": 17,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -43.976684000000006,
+      "local_date": "2024-05-19",
+      "scenario": "optimal",
+      "sim_day": 18,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -45.94303500000001,
+      "local_date": "2024-05-20",
+      "scenario": "optimal",
+      "sim_day": 19,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -48.56840400000001,
+      "local_date": "2024-05-21",
+      "scenario": "optimal",
+      "sim_day": 20,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -50.191376000000005,
+      "local_date": "2024-05-22",
+      "scenario": "optimal",
+      "sim_day": 21,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -52.57839200000001,
+      "local_date": "2024-05-23",
+      "scenario": "optimal",
+      "sim_day": 22,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -54.90685500000001,
+      "local_date": "2024-05-24",
+      "scenario": "optimal",
+      "sim_day": 23,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -57.56644700000001,
+      "local_date": "2024-05-25",
+      "scenario": "optimal",
+      "sim_day": 24,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -60.01226100000001,
+      "local_date": "2024-05-26",
+      "scenario": "optimal",
+      "sim_day": 25,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -62.08842200000001,
+      "local_date": "2024-05-27",
+      "scenario": "optimal",
+      "sim_day": 26,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -63.28554100000001,
+      "local_date": "2024-05-28",
+      "scenario": "optimal",
+      "sim_day": 27,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -65.98300800000001,
+      "local_date": "2024-05-29",
+      "scenario": "optimal",
+      "sim_day": 28,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -67.83117000000001,
+      "local_date": "2024-05-30",
+      "scenario": "optimal",
+      "sim_day": 29,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -70.57918100000002,
+      "local_date": "2024-05-31",
+      "scenario": "optimal",
+      "sim_day": 30,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -73.65003100000001,
+      "local_date": "2024-06-01",
+      "scenario": "optimal",
+      "sim_day": 31,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -75.92287600000002,
+      "local_date": "2024-06-02",
+      "scenario": "optimal",
+      "sim_day": 32,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -77.15992100000001,
+      "local_date": "2024-06-03",
+      "scenario": "optimal",
+      "sim_day": 33,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -79.22415900000001,
+      "local_date": "2024-06-04",
+      "scenario": "optimal",
+      "sim_day": 34,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -81.41371500000001,
+      "local_date": "2024-06-05",
+      "scenario": "optimal",
+      "sim_day": 35,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -84.49827200000001,
+      "local_date": "2024-06-06",
+      "scenario": "optimal",
+      "sim_day": 36,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -87.42327900000001,
+      "local_date": "2024-06-07",
+      "scenario": "optimal",
+      "sim_day": 37,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -90.29486800000001,
+      "local_date": "2024-06-08",
+      "scenario": "optimal",
+      "sim_day": 38,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -93.55336700000001,
+      "local_date": "2024-06-09",
+      "scenario": "optimal",
+      "sim_day": 39,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -95.622894,
+      "local_date": "2024-06-10",
+      "scenario": "optimal",
+      "sim_day": 40,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -97.816406,
+      "local_date": "2024-06-11",
+      "scenario": "optimal",
+      "sim_day": 41,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -100.533975,
+      "local_date": "2024-06-12",
+      "scenario": "optimal",
+      "sim_day": 42,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -103.645538,
+      "local_date": "2024-06-13",
+      "scenario": "optimal",
+      "sim_day": 43,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -104.80924,
+      "local_date": "2024-06-14",
+      "scenario": "optimal",
+      "sim_day": 44,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -106.457434,
+      "local_date": "2024-06-15",
+      "scenario": "optimal",
+      "sim_day": 45,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -109.230889,
+      "local_date": "2024-06-16",
+      "scenario": "optimal",
+      "sim_day": 46,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -111.947091,
+      "local_date": "2024-06-17",
+      "scenario": "optimal",
+      "sim_day": 47,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -114.571161,
+      "local_date": "2024-06-18",
+      "scenario": "optimal",
+      "sim_day": 48,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -115.78182100000001,
+      "local_date": "2024-06-19",
+      "scenario": "optimal",
+      "sim_day": 49,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -119.04625700000001,
+      "local_date": "2024-06-20",
+      "scenario": "optimal",
+      "sim_day": 50,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -120.88122500000001,
+      "local_date": "2024-06-21",
+      "scenario": "optimal",
+      "sim_day": 51,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -122.95333000000001,
+      "local_date": "2024-06-22",
+      "scenario": "optimal",
+      "sim_day": 52,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -125.37448800000001,
+      "local_date": "2024-06-23",
+      "scenario": "optimal",
+      "sim_day": 53,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -128.154775,
+      "local_date": "2024-06-24",
+      "scenario": "optimal",
+      "sim_day": 54,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -131.003655,
+      "local_date": "2024-06-25",
+      "scenario": "optimal",
+      "sim_day": 55,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -134.31180500000002,
+      "local_date": "2024-06-26",
+      "scenario": "optimal",
+      "sim_day": 56,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -136.76346700000002,
+      "local_date": "2024-06-27",
+      "scenario": "optimal",
+      "sim_day": 57,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -139.54616800000002,
+      "local_date": "2024-06-28",
+      "scenario": "optimal",
+      "sim_day": 58,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -142.795699,
+      "local_date": "2024-06-29",
+      "scenario": "optimal",
+      "sim_day": 59,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -145.053928,
+      "local_date": "2024-06-30",
+      "scenario": "optimal",
+      "sim_day": 60,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -1.224033,
+      "local_date": "2024-05-02",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 1,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -3.479658,
+      "local_date": "2024-05-03",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 2,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -5.333505000000001,
+      "local_date": "2024-05-04",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 3,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -6.8947330000000004,
+      "local_date": "2024-05-05",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 4,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -9.365563,
+      "local_date": "2024-05-06",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 5,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -10.628903,
+      "local_date": "2024-05-07",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 6,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -13.385850999999999,
+      "local_date": "2024-05-08",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 7,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -16.593633999999998,
+      "local_date": "2024-05-09",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 8,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -18.770999999999997,
+      "local_date": "2024-05-10",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 9,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -20.761364999999998,
+      "local_date": "2024-05-11",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 10,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -23.625545,
+      "local_date": "2024-05-12",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 11,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -26.912381999999997,
+      "local_date": "2024-05-13",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 12,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -30.154579,
+      "local_date": "2024-05-14",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 13,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -33.34608,
+      "local_date": "2024-05-15",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 14,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -36.036932,
+      "local_date": "2024-05-16",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 15,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -38.978744,
+      "local_date": "2024-05-17",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 16,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -41.07007,
+      "local_date": "2024-05-18",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 17,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -43.159927,
+      "local_date": "2024-05-19",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 18,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -45.080628000000004,
+      "local_date": "2024-05-20",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 19,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -47.80576800000001,
+      "local_date": "2024-05-21",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 20,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -49.54899300000001,
+      "local_date": "2024-05-22",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 21,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -51.87871700000001,
+      "local_date": "2024-05-23",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 22,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -54.23367300000001,
+      "local_date": "2024-05-24",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 23,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -56.87021400000001,
+      "local_date": "2024-05-25",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 24,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -59.372951000000015,
+      "local_date": "2024-05-26",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 25,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -61.19905400000002,
+      "local_date": "2024-05-27",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 26,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -62.38545000000002,
+      "local_date": "2024-05-28",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 27,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -65.06289400000001,
+      "local_date": "2024-05-29",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 28,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -66.93133100000001,
+      "local_date": "2024-05-30",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 29,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -69.64823500000001,
+      "local_date": "2024-05-31",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 30,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -72.70910100000002,
+      "local_date": "2024-06-01",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 31,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -75.00717700000001,
+      "local_date": "2024-06-02",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 32,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -76.25045700000001,
+      "local_date": "2024-06-03",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 33,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -78.27196500000001,
+      "local_date": "2024-06-04",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 34,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -80.50385500000002,
+      "local_date": "2024-06-05",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 35,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -83.54923200000002,
+      "local_date": "2024-06-06",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 36,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -86.45855900000002,
+      "local_date": "2024-06-07",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 37,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -89.34934200000002,
+      "local_date": "2024-06-08",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 38,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -92.60315500000002,
+      "local_date": "2024-06-09",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 39,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -94.75699000000002,
+      "local_date": "2024-06-10",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 40,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -96.94828500000001,
+      "local_date": "2024-06-11",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 41,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -99.66882700000001,
+      "local_date": "2024-06-12",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 42,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -102.71355500000001,
+      "local_date": "2024-06-13",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 43,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -103.92344800000001,
+      "local_date": "2024-06-14",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 44,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -105.61956300000001,
+      "local_date": "2024-06-15",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 45,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -108.52986000000001,
+      "local_date": "2024-06-16",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 46,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -111.35645700000002,
+      "local_date": "2024-06-17",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 47,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -114.10106000000002,
+      "local_date": "2024-06-18",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 48,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -115.16738000000002,
+      "local_date": "2024-06-19",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 49,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -118.31176000000002,
+      "local_date": "2024-06-20",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 50,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -120.10324100000003,
+      "local_date": "2024-06-21",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 51,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -122.09712000000003,
+      "local_date": "2024-06-22",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 52,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -124.44094500000003,
+      "local_date": "2024-06-23",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 53,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -127.18230300000003,
+      "local_date": "2024-06-24",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 54,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -130.05447600000002,
+      "local_date": "2024-06-25",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 55,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -133.358076,
+      "local_date": "2024-06-26",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 56,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -135.80162800000002,
+      "local_date": "2024-06-27",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 57,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -138.56901000000002,
+      "local_date": "2024-06-28",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 58,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -141.87529300000003,
+      "local_date": "2024-06-29",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 59,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -143.99684200000002,
+      "local_date": "2024-06-30",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 60,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -0.954943,
+      "local_date": "2024-05-02",
+      "scenario": "forecast_driven",
+      "sim_day": 1,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -3.175272,
+      "local_date": "2024-05-03",
+      "scenario": "forecast_driven",
+      "sim_day": 2,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -4.9475999999999996,
+      "local_date": "2024-05-04",
+      "scenario": "forecast_driven",
+      "sim_day": 3,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -6.486751,
+      "local_date": "2024-05-05",
+      "scenario": "forecast_driven",
+      "sim_day": 4,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -8.969661,
+      "local_date": "2024-05-06",
+      "scenario": "forecast_driven",
+      "sim_day": 5,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -10.1821,
+      "local_date": "2024-05-07",
+      "scenario": "forecast_driven",
+      "sim_day": 6,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -12.952342999999999,
+      "local_date": "2024-05-08",
+      "scenario": "forecast_driven",
+      "sim_day": 7,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -16.146003,
+      "local_date": "2024-05-09",
+      "scenario": "forecast_driven",
+      "sim_day": 8,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -18.169322,
+      "local_date": "2024-05-10",
+      "scenario": "forecast_driven",
+      "sim_day": 9,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -20.154168000000002,
+      "local_date": "2024-05-11",
+      "scenario": "forecast_driven",
+      "sim_day": 10,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -22.976414000000002,
+      "local_date": "2024-05-12",
+      "scenario": "forecast_driven",
+      "sim_day": 11,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -26.267964000000003,
+      "local_date": "2024-05-13",
+      "scenario": "forecast_driven",
+      "sim_day": 12,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -29.497327000000002,
+      "local_date": "2024-05-14",
+      "scenario": "forecast_driven",
+      "sim_day": 13,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -32.651625,
+      "local_date": "2024-05-15",
+      "scenario": "forecast_driven",
+      "sim_day": 14,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -35.325210000000006,
+      "local_date": "2024-05-16",
+      "scenario": "forecast_driven",
+      "sim_day": 15,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -38.25200400000001,
+      "local_date": "2024-05-17",
+      "scenario": "forecast_driven",
+      "sim_day": 16,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -40.239757000000004,
+      "local_date": "2024-05-18",
+      "scenario": "forecast_driven",
+      "sim_day": 17,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -42.160188000000005,
+      "local_date": "2024-05-19",
+      "scenario": "forecast_driven",
+      "sim_day": 18,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -44.090206,
+      "local_date": "2024-05-20",
+      "scenario": "forecast_driven",
+      "sim_day": 19,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -46.755555,
+      "local_date": "2024-05-21",
+      "scenario": "forecast_driven",
+      "sim_day": 20,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -48.360361,
+      "local_date": "2024-05-22",
+      "scenario": "forecast_driven",
+      "sim_day": 21,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -50.526863,
+      "local_date": "2024-05-23",
+      "scenario": "forecast_driven",
+      "sim_day": 22,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -52.806345,
+      "local_date": "2024-05-24",
+      "scenario": "forecast_driven",
+      "sim_day": 23,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -55.334808,
+      "local_date": "2024-05-25",
+      "scenario": "forecast_driven",
+      "sim_day": 24,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -57.778426,
+      "local_date": "2024-05-26",
+      "scenario": "forecast_driven",
+      "sim_day": 25,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -59.575299,
+      "local_date": "2024-05-27",
+      "scenario": "forecast_driven",
+      "sim_day": 26,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -60.736343,
+      "local_date": "2024-05-28",
+      "scenario": "forecast_driven",
+      "sim_day": 27,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -63.314785,
+      "local_date": "2024-05-29",
+      "scenario": "forecast_driven",
+      "sim_day": 28,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -65.118456,
+      "local_date": "2024-05-30",
+      "scenario": "forecast_driven",
+      "sim_day": 29,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -67.84637,
+      "local_date": "2024-05-31",
+      "scenario": "forecast_driven",
+      "sim_day": 30,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -70.905913,
+      "local_date": "2024-06-01",
+      "scenario": "forecast_driven",
+      "sim_day": 31,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -73.193749,
+      "local_date": "2024-06-02",
+      "scenario": "forecast_driven",
+      "sim_day": 32,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -74.293064,
+      "local_date": "2024-06-03",
+      "scenario": "forecast_driven",
+      "sim_day": 33,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -76.255673,
+      "local_date": "2024-06-04",
+      "scenario": "forecast_driven",
+      "sim_day": 34,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -78.471778,
+      "local_date": "2024-06-05",
+      "scenario": "forecast_driven",
+      "sim_day": 35,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -81.528114,
+      "local_date": "2024-06-06",
+      "scenario": "forecast_driven",
+      "sim_day": 36,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -84.438027,
+      "local_date": "2024-06-07",
+      "scenario": "forecast_driven",
+      "sim_day": 37,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -87.29932600000001,
+      "local_date": "2024-06-08",
+      "scenario": "forecast_driven",
+      "sim_day": 38,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -90.558006,
+      "local_date": "2024-06-09",
+      "scenario": "forecast_driven",
+      "sim_day": 39,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -92.492818,
+      "local_date": "2024-06-10",
+      "scenario": "forecast_driven",
+      "sim_day": 40,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -94.65047,
+      "local_date": "2024-06-11",
+      "scenario": "forecast_driven",
+      "sim_day": 41,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -97.339614,
+      "local_date": "2024-06-12",
+      "scenario": "forecast_driven",
+      "sim_day": 42,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -100.412665,
+      "local_date": "2024-06-13",
+      "scenario": "forecast_driven",
+      "sim_day": 43,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -101.59644,
+      "local_date": "2024-06-14",
+      "scenario": "forecast_driven",
+      "sim_day": 44,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -103.246131,
+      "local_date": "2024-06-15",
+      "scenario": "forecast_driven",
+      "sim_day": 45,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -106.15697700000001,
+      "local_date": "2024-06-16",
+      "scenario": "forecast_driven",
+      "sim_day": 46,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -108.97330500000001,
+      "local_date": "2024-06-17",
+      "scenario": "forecast_driven",
+      "sim_day": 47,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -111.671755,
+      "local_date": "2024-06-18",
+      "scenario": "forecast_driven",
+      "sim_day": 48,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -112.507005,
+      "local_date": "2024-06-19",
+      "scenario": "forecast_driven",
+      "sim_day": 49,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -115.583685,
+      "local_date": "2024-06-20",
+      "scenario": "forecast_driven",
+      "sim_day": 50,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -117.325554,
+      "local_date": "2024-06-21",
+      "scenario": "forecast_driven",
+      "sim_day": 51,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -119.310082,
+      "local_date": "2024-06-22",
+      "scenario": "forecast_driven",
+      "sim_day": 52,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -121.60498899999999,
+      "local_date": "2024-06-23",
+      "scenario": "forecast_driven",
+      "sim_day": 53,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -124.35731399999999,
+      "local_date": "2024-06-24",
+      "scenario": "forecast_driven",
+      "sim_day": 54,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -127.11064199999998,
+      "local_date": "2024-06-25",
+      "scenario": "forecast_driven",
+      "sim_day": 55,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -130.43797899999998,
+      "local_date": "2024-06-26",
+      "scenario": "forecast_driven",
+      "sim_day": 56,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -132.868621,
+      "local_date": "2024-06-27",
+      "scenario": "forecast_driven",
+      "sim_day": 57,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -135.636711,
+      "local_date": "2024-06-28",
+      "scenario": "forecast_driven",
+      "sim_day": 58,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -138.924851,
+      "local_date": "2024-06-29",
+      "scenario": "forecast_driven",
+      "sim_day": 59,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -140.966758,
+      "local_date": "2024-06-30",
+      "scenario": "forecast_driven",
+      "sim_day": 60,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -1.0562,
+      "local_date": "2024-05-02",
+      "scenario": "naive_continuous",
+      "sim_day": 1,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -3.311824,
+      "local_date": "2024-05-03",
+      "scenario": "naive_continuous",
+      "sim_day": 2,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -5.165672,
+      "local_date": "2024-05-04",
+      "scenario": "naive_continuous",
+      "sim_day": 3,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -6.7269,
+      "local_date": "2024-05-05",
+      "scenario": "naive_continuous",
+      "sim_day": 4,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -9.197728999999999,
+      "local_date": "2024-05-06",
+      "scenario": "naive_continuous",
+      "sim_day": 5,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -10.461067,
+      "local_date": "2024-05-07",
+      "scenario": "naive_continuous",
+      "sim_day": 6,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -13.218016,
+      "local_date": "2024-05-08",
+      "scenario": "naive_continuous",
+      "sim_day": 7,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -16.425800000000002,
+      "local_date": "2024-05-09",
+      "scenario": "naive_continuous",
+      "sim_day": 8,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -18.603164000000003,
+      "local_date": "2024-05-10",
+      "scenario": "naive_continuous",
+      "sim_day": 9,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -20.593529000000004,
+      "local_date": "2024-05-11",
+      "scenario": "naive_continuous",
+      "sim_day": 10,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -23.457710000000002,
+      "local_date": "2024-05-12",
+      "scenario": "naive_continuous",
+      "sim_day": 11,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -26.744547,
+      "local_date": "2024-05-13",
+      "scenario": "naive_continuous",
+      "sim_day": 12,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -29.986744,
+      "local_date": "2024-05-14",
+      "scenario": "naive_continuous",
+      "sim_day": 13,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -33.178244,
+      "local_date": "2024-05-15",
+      "scenario": "naive_continuous",
+      "sim_day": 14,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -35.869096,
+      "local_date": "2024-05-16",
+      "scenario": "naive_continuous",
+      "sim_day": 15,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -38.810908,
+      "local_date": "2024-05-17",
+      "scenario": "naive_continuous",
+      "sim_day": 16,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -40.902234,
+      "local_date": "2024-05-18",
+      "scenario": "naive_continuous",
+      "sim_day": 17,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -42.99209,
+      "local_date": "2024-05-19",
+      "scenario": "naive_continuous",
+      "sim_day": 18,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -44.912791,
+      "local_date": "2024-05-20",
+      "scenario": "naive_continuous",
+      "sim_day": 19,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -47.637932,
+      "local_date": "2024-05-21",
+      "scenario": "naive_continuous",
+      "sim_day": 20,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -49.381158,
+      "local_date": "2024-05-22",
+      "scenario": "naive_continuous",
+      "sim_day": 21,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -51.710882999999995,
+      "local_date": "2024-05-23",
+      "scenario": "naive_continuous",
+      "sim_day": 22,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -54.065839,
+      "local_date": "2024-05-24",
+      "scenario": "naive_continuous",
+      "sim_day": 23,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -56.702380999999995,
+      "local_date": "2024-05-25",
+      "scenario": "naive_continuous",
+      "sim_day": 24,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -59.205118999999996,
+      "local_date": "2024-05-26",
+      "scenario": "naive_continuous",
+      "sim_day": 25,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -61.031222,
+      "local_date": "2024-05-27",
+      "scenario": "naive_continuous",
+      "sim_day": 26,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -62.217617,
+      "local_date": "2024-05-28",
+      "scenario": "naive_continuous",
+      "sim_day": 27,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -64.895061,
+      "local_date": "2024-05-29",
+      "scenario": "naive_continuous",
+      "sim_day": 28,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -66.763498,
+      "local_date": "2024-05-30",
+      "scenario": "naive_continuous",
+      "sim_day": 29,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -69.480402,
+      "local_date": "2024-05-31",
+      "scenario": "naive_continuous",
+      "sim_day": 30,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -72.541268,
+      "local_date": "2024-06-01",
+      "scenario": "naive_continuous",
+      "sim_day": 31,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -74.839344,
+      "local_date": "2024-06-02",
+      "scenario": "naive_continuous",
+      "sim_day": 32,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -76.082624,
+      "local_date": "2024-06-03",
+      "scenario": "naive_continuous",
+      "sim_day": 33,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -78.104131,
+      "local_date": "2024-06-04",
+      "scenario": "naive_continuous",
+      "sim_day": 34,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -80.33602099999999,
+      "local_date": "2024-06-05",
+      "scenario": "naive_continuous",
+      "sim_day": 35,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -83.38139699999999,
+      "local_date": "2024-06-06",
+      "scenario": "naive_continuous",
+      "sim_day": 36,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -86.290725,
+      "local_date": "2024-06-07",
+      "scenario": "naive_continuous",
+      "sim_day": 37,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -89.181508,
+      "local_date": "2024-06-08",
+      "scenario": "naive_continuous",
+      "sim_day": 38,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -92.43532099999999,
+      "local_date": "2024-06-09",
+      "scenario": "naive_continuous",
+      "sim_day": 39,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -94.58915499999999,
+      "local_date": "2024-06-10",
+      "scenario": "naive_continuous",
+      "sim_day": 40,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -96.78044999999999,
+      "local_date": "2024-06-11",
+      "scenario": "naive_continuous",
+      "sim_day": 41,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -99.50099199999998,
+      "local_date": "2024-06-12",
+      "scenario": "naive_continuous",
+      "sim_day": 42,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -102.54571899999998,
+      "local_date": "2024-06-13",
+      "scenario": "naive_continuous",
+      "sim_day": 43,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -103.75561399999998,
+      "local_date": "2024-06-14",
+      "scenario": "naive_continuous",
+      "sim_day": 44,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -105.45172899999999,
+      "local_date": "2024-06-15",
+      "scenario": "naive_continuous",
+      "sim_day": 45,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -108.36202799999998,
+      "local_date": "2024-06-16",
+      "scenario": "naive_continuous",
+      "sim_day": 46,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -111.18862499999999,
+      "local_date": "2024-06-17",
+      "scenario": "naive_continuous",
+      "sim_day": 47,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -113.93322799999999,
+      "local_date": "2024-06-18",
+      "scenario": "naive_continuous",
+      "sim_day": 48,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -114.99954899999999,
+      "local_date": "2024-06-19",
+      "scenario": "naive_continuous",
+      "sim_day": 49,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -118.14392999999998,
+      "local_date": "2024-06-20",
+      "scenario": "naive_continuous",
+      "sim_day": 50,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -119.93540999999999,
+      "local_date": "2024-06-21",
+      "scenario": "naive_continuous",
+      "sim_day": 51,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -121.92928799999999,
+      "local_date": "2024-06-22",
+      "scenario": "naive_continuous",
+      "sim_day": 52,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -124.27311199999998,
+      "local_date": "2024-06-23",
+      "scenario": "naive_continuous",
+      "sim_day": 53,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -127.01446999999999,
+      "local_date": "2024-06-24",
+      "scenario": "naive_continuous",
+      "sim_day": 54,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -129.886643,
+      "local_date": "2024-06-25",
+      "scenario": "naive_continuous",
+      "sim_day": 55,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -133.19024199999998,
+      "local_date": "2024-06-26",
+      "scenario": "naive_continuous",
+      "sim_day": 56,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -135.633794,
+      "local_date": "2024-06-27",
+      "scenario": "naive_continuous",
+      "sim_day": 57,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -138.401177,
+      "local_date": "2024-06-28",
+      "scenario": "naive_continuous",
+      "sim_day": 58,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -141.70746,
+      "local_date": "2024-06-29",
+      "scenario": "naive_continuous",
+      "sim_day": 59,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -143.82901,
+      "local_date": "2024-06-30",
+      "scenario": "naive_continuous",
+      "sim_day": 60,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -1.925455,
+      "local_date": "2024-05-02",
+      "scenario": "optimal",
+      "sim_day": 1,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -4.152604999999999,
+      "local_date": "2024-05-03",
+      "scenario": "optimal",
+      "sim_day": 2,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -6.000684999999999,
+      "local_date": "2024-05-04",
+      "scenario": "optimal",
+      "sim_day": 3,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -7.579574999999998,
+      "local_date": "2024-05-05",
+      "scenario": "optimal",
+      "sim_day": 4,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -10.078879999999998,
+      "local_date": "2024-05-06",
+      "scenario": "optimal",
+      "sim_day": 5,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -11.298335999999999,
+      "local_date": "2024-05-07",
+      "scenario": "optimal",
+      "sim_day": 6,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -14.107187999999999,
+      "local_date": "2024-05-08",
+      "scenario": "optimal",
+      "sim_day": 7,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -17.303167,
+      "local_date": "2024-05-09",
+      "scenario": "optimal",
+      "sim_day": 8,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -19.488011,
+      "local_date": "2024-05-10",
+      "scenario": "optimal",
+      "sim_day": 9,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -21.461795,
+      "local_date": "2024-05-11",
+      "scenario": "optimal",
+      "sim_day": 10,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -24.343456999999997,
+      "local_date": "2024-05-12",
+      "scenario": "optimal",
+      "sim_day": 11,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -27.638043999999997,
+      "local_date": "2024-05-13",
+      "scenario": "optimal",
+      "sim_day": 12,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -30.899613999999996,
+      "local_date": "2024-05-14",
+      "scenario": "optimal",
+      "sim_day": 13,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -34.07795899999999,
+      "local_date": "2024-05-15",
+      "scenario": "optimal",
+      "sim_day": 14,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -36.75619499999999,
+      "local_date": "2024-05-16",
+      "scenario": "optimal",
+      "sim_day": 15,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -39.72891499999999,
+      "local_date": "2024-05-17",
+      "scenario": "optimal",
+      "sim_day": 16,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -41.78852199999999,
+      "local_date": "2024-05-18",
+      "scenario": "optimal",
+      "sim_day": 17,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -43.87369399999999,
+      "local_date": "2024-05-19",
+      "scenario": "optimal",
+      "sim_day": 18,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -45.83422399999999,
+      "local_date": "2024-05-20",
+      "scenario": "optimal",
+      "sim_day": 19,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -48.50872199999999,
+      "local_date": "2024-05-21",
+      "scenario": "optimal",
+      "sim_day": 20,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -50.189319999999995,
+      "local_date": "2024-05-22",
+      "scenario": "optimal",
+      "sim_day": 21,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -52.626996999999996,
+      "local_date": "2024-05-23",
+      "scenario": "optimal",
+      "sim_day": 22,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -54.938157999999994,
+      "local_date": "2024-05-24",
+      "scenario": "optimal",
+      "sim_day": 23,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -57.595153999999994,
+      "local_date": "2024-05-25",
+      "scenario": "optimal",
+      "sim_day": 24,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -60.092034999999996,
+      "local_date": "2024-05-26",
+      "scenario": "optimal",
+      "sim_day": 25,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -61.936069999999994,
+      "local_date": "2024-05-27",
+      "scenario": "optimal",
+      "sim_day": 26,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -63.13490099999999,
+      "local_date": "2024-05-28",
+      "scenario": "optimal",
+      "sim_day": 27,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -65.74109499999999,
+      "local_date": "2024-05-29",
+      "scenario": "optimal",
+      "sim_day": 28,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -67.591473,
+      "local_date": "2024-05-30",
+      "scenario": "optimal",
+      "sim_day": 29,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -70.29518499999999,
+      "local_date": "2024-05-31",
+      "scenario": "optimal",
+      "sim_day": 30,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -73.47495299999999,
+      "local_date": "2024-06-01",
+      "scenario": "optimal",
+      "sim_day": 31,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -75.74779799999999,
+      "local_date": "2024-06-02",
+      "scenario": "optimal",
+      "sim_day": 32,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -77.00153099999999,
+      "local_date": "2024-06-03",
+      "scenario": "optimal",
+      "sim_day": 33,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -79.04908099999999,
+      "local_date": "2024-06-04",
+      "scenario": "optimal",
+      "sim_day": 34,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -81.26123699999998,
+      "local_date": "2024-06-05",
+      "scenario": "optimal",
+      "sim_day": 35,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -84.32319399999999,
+      "local_date": "2024-06-06",
+      "scenario": "optimal",
+      "sim_day": 36,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -87.24820099999998,
+      "local_date": "2024-06-07",
+      "scenario": "optimal",
+      "sim_day": 37,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -90.11978999999998,
+      "local_date": "2024-06-08",
+      "scenario": "optimal",
+      "sim_day": 38,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -93.37655899999999,
+      "local_date": "2024-06-09",
+      "scenario": "optimal",
+      "sim_day": 39,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -95.47445299999998,
+      "local_date": "2024-06-10",
+      "scenario": "optimal",
+      "sim_day": 40,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -97.64050799999998,
+      "local_date": "2024-06-11",
+      "scenario": "optimal",
+      "sim_day": 41,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -100.35889599999999,
+      "local_date": "2024-06-12",
+      "scenario": "optimal",
+      "sim_day": 42,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -103.501376,
+      "local_date": "2024-06-13",
+      "scenario": "optimal",
+      "sim_day": 43,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -104.665078,
+      "local_date": "2024-06-14",
+      "scenario": "optimal",
+      "sim_day": 44,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -106.35901199999999,
+      "local_date": "2024-06-15",
+      "scenario": "optimal",
+      "sim_day": 45,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -109.25362999999999,
+      "local_date": "2024-06-16",
+      "scenario": "optimal",
+      "sim_day": 46,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -112.14249399999999,
+      "local_date": "2024-06-17",
+      "scenario": "optimal",
+      "sim_day": 47,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -114.76706899999999,
+      "local_date": "2024-06-18",
+      "scenario": "optimal",
+      "sim_day": 48,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -115.97080799999999,
+      "local_date": "2024-06-19",
+      "scenario": "optimal",
+      "sim_day": 49,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -119.10230299999999,
+      "local_date": "2024-06-20",
+      "scenario": "optimal",
+      "sim_day": 50,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -120.87242699999999,
+      "local_date": "2024-06-21",
+      "scenario": "optimal",
+      "sim_day": 51,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -122.86306299999998,
+      "local_date": "2024-06-22",
+      "scenario": "optimal",
+      "sim_day": 52,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -125.19940899999999,
+      "local_date": "2024-06-23",
+      "scenario": "optimal",
+      "sim_day": 53,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -127.933208,
+      "local_date": "2024-06-24",
+      "scenario": "optimal",
+      "sim_day": 54,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -130.772031,
+      "local_date": "2024-06-25",
+      "scenario": "optimal",
+      "sim_day": 55,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -134.05349999999999,
+      "local_date": "2024-06-26",
+      "scenario": "optimal",
+      "sim_day": 56,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -136.517237,
+      "local_date": "2024-06-27",
+      "scenario": "optimal",
+      "sim_day": 57,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -139.265308,
+      "local_date": "2024-06-28",
+      "scenario": "optimal",
+      "sim_day": 58,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -142.623576,
+      "local_date": "2024-06-29",
+      "scenario": "optimal",
+      "sim_day": 59,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -143.829011,
+      "local_date": "2024-06-30",
+      "scenario": "optimal",
+      "sim_day": 60,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -1.056199,
+      "local_date": "2024-05-02",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 1,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -3.3118240000000005,
+      "local_date": "2024-05-03",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 2,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -5.165671000000001,
+      "local_date": "2024-05-04",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 3,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -6.726899,
+      "local_date": "2024-05-05",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 4,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -9.197729,
+      "local_date": "2024-05-06",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 5,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -10.461068000000001,
+      "local_date": "2024-05-07",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 6,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -13.218016,
+      "local_date": "2024-05-08",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 7,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -16.425799,
+      "local_date": "2024-05-09",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 8,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -18.603165,
+      "local_date": "2024-05-10",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 9,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -20.59353,
+      "local_date": "2024-05-11",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 10,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -23.457711,
+      "local_date": "2024-05-12",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 11,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -26.744547999999998,
+      "local_date": "2024-05-13",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 12,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -29.986743999999998,
+      "local_date": "2024-05-14",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 13,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -33.178245,
+      "local_date": "2024-05-15",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 14,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -35.869097,
+      "local_date": "2024-05-16",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 15,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -38.810908999999995,
+      "local_date": "2024-05-17",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 16,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -40.902235,
+      "local_date": "2024-05-18",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 17,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -42.992092,
+      "local_date": "2024-05-19",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 18,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -44.912793,
+      "local_date": "2024-05-20",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 19,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -47.637933000000004,
+      "local_date": "2024-05-21",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 20,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -49.381158000000006,
+      "local_date": "2024-05-22",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 21,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -51.710882000000005,
+      "local_date": "2024-05-23",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 22,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -54.06583800000001,
+      "local_date": "2024-05-24",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 23,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -56.70237900000001,
+      "local_date": "2024-05-25",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 24,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -59.20511600000001,
+      "local_date": "2024-05-26",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 25,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -61.031219000000014,
+      "local_date": "2024-05-27",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 26,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -62.217615000000016,
+      "local_date": "2024-05-28",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 27,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -64.89505900000002,
+      "local_date": "2024-05-29",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 28,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -66.76349600000002,
+      "local_date": "2024-05-30",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 29,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -69.48040000000002,
+      "local_date": "2024-05-31",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 30,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -72.54126600000002,
+      "local_date": "2024-06-01",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 31,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -74.83934200000002,
+      "local_date": "2024-06-02",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 32,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -76.08262200000001,
+      "local_date": "2024-06-03",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 33,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -78.10413000000001,
+      "local_date": "2024-06-04",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 34,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -80.33602000000002,
+      "local_date": "2024-06-05",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 35,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -83.38139600000002,
+      "local_date": "2024-06-06",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 36,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -86.29072300000003,
+      "local_date": "2024-06-07",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 37,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -89.18150600000003,
+      "local_date": "2024-06-08",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 38,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -92.43531900000002,
+      "local_date": "2024-06-09",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 39,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -94.58915400000002,
+      "local_date": "2024-06-10",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 40,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -96.78044900000002,
+      "local_date": "2024-06-11",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 41,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -99.50099100000001,
+      "local_date": "2024-06-12",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 42,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -102.54571900000002,
+      "local_date": "2024-06-13",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 43,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -103.75561200000001,
+      "local_date": "2024-06-14",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 44,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -105.45172700000002,
+      "local_date": "2024-06-15",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 45,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -108.36202400000002,
+      "local_date": "2024-06-16",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 46,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -111.18862100000003,
+      "local_date": "2024-06-17",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 47,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -113.93322400000002,
+      "local_date": "2024-06-18",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 48,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -114.99954500000003,
+      "local_date": "2024-06-19",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 49,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -118.14392500000002,
+      "local_date": "2024-06-20",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 50,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -119.93540600000003,
+      "local_date": "2024-06-21",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 51,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -121.92928500000004,
+      "local_date": "2024-06-22",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 52,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -124.27311000000003,
+      "local_date": "2024-06-23",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 53,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -127.01446800000004,
+      "local_date": "2024-06-24",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 54,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -129.88664100000003,
+      "local_date": "2024-06-25",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 55,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -133.19024100000001,
+      "local_date": "2024-06-26",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 56,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -135.63379300000003,
+      "local_date": "2024-06-27",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 57,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -138.40117600000002,
+      "local_date": "2024-06-28",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 58,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -141.70745900000003,
+      "local_date": "2024-06-29",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 59,
+      "tariff_id": "static_2024"
+    },
+    {
+      "cumulative_net_cost_eur": -143.82900800000002,
+      "local_date": "2024-06-30",
+      "scenario": "perfect_foresight_plan",
+      "sim_day": 60,
+      "tariff_id": "static_2024"
+    }
+  ],
+  "windows": [
+    {
+      "attainable_value_share": 0.06734200099233169,
+      "available_savings_eur": 0.2942740000000015,
+      "captured_value_share": -9.64621407259894,
+      "fallback_days": 2,
+      "forecast_driven_cost_eur": -141.921052,
+      "forecast_error_cost_eur": 2.8584470000000124,
+      "hindsight_cost_eur": -145.053956,
+      "load_model_key": "load_hgb",
+      "myopia_cost_eur": 0.27445699999998396,
+      "naive_cost_eur": -144.759682,
+      "perfect_foresight_cost_eur": -144.77949900000002,
+      "pv_model_key": "pvlib_hgb",
+      "region": "home",
+      "regret_eur": 3.1329039999999964,
+      "sim_end": "2024-06-30",
+      "sim_start": "2024-05-02",
+      "simulated_days": 60,
+      "tariff_id": "dynamic_2024"
+    },
+    {
+      "attainable_value_share": null,
+      "available_savings_eur": 0.0,
+      "captured_value_share": null,
+      "fallback_days": 2,
+      "forecast_driven_cost_eur": -145.04421100000002,
+      "forecast_error_cost_eur": 2.8622530000000097,
+      "hindsight_cost_eur": -147.90646400000003,
+      "load_model_key": "load_hgb",
+      "myopia_cost_eur": 0.0,
+      "naive_cost_eur": -147.90646400000003,
+      "perfect_foresight_cost_eur": -147.90646400000003,
+      "pv_model_key": "pvlib_hgb",
+      "region": "home",
+      "regret_eur": 2.8622530000000097,
+      "sim_end": "2024-06-30",
+      "sim_start": "2024-05-02",
+      "simulated_days": 60,
+      "tariff_id": "static_2024"
+    }
+  ]
+}

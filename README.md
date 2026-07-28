@@ -6,14 +6,28 @@
 German day-ahead market data + real PV/battery telemetry (Fenecon Home 10, 8.8 kWp /
 14 kWh) → warehouse → dbt marts → battery dispatch optimizer → ML forecasts → dashboard.
 
-> **Status: M7 — ML forecasting.** Day-ahead hourly PV and load forecasts, evaluated against
+![Forward-looking dispatch: naive self-consumption vs forecast-driven dispatch vs the hindsight
+optimum, over 60 rolling days of the synthetic demo data](docs/img/regret_three_way.png)
+
+> **Status: M8 — forward-looking dispatch.** The milestone where the forecasts meet the optimizer:
+> each Berlin day's battery schedule is planned at that day's decision time from the forecasts
+> available then, and then *executed against what actually happened*. `mart_dispatch_regret` sets the
+> result beside the naive baseline and the hindsight optimum, and the honest answer on synthetic data
+> is that **forecast-driven dispatch captured −965% of the available savings** — it lost money. That
+> is not a bug and it is the most interesting number in the repo: the prize is **€0.29** over sixty
+> days, and acting on forecasts good enough to score 0.18 kWh MAE costs **€2.86**. A day-ahead
+> planner given *perfect* forecasts captures only **6.7%**, so almost none of the shortfall is
+> forecasting's fault — the value simply is not reachable one day at a time. Details in
+> [Forward-looking dispatch (M8)](#forward-looking-dispatch-m8). Previously:
+>
+> **M7 — ML forecasting.** Day-ahead hourly PV and load forecasts, evaluated against
 > persistence and seasonal-naive baselines in `mart_forecast_eval`. The deliverable is the
 > *harness*, not an accuracy number: a backtester that provably rejects a leaked feature (four
 > deliberate cheating attempts, plus a positive control), one vintage-selection rule stated once
 > and enforced everywhere, and an observation lag that makes "persistence = yesterday" the lookahead
 > it actually is on this platform. On seeded synthetic data the flat-plate PV model is the *oracle* —
 > it generated the labels — so the mart labels it `role='oracle'` rather than letting it be ranked.
-> Details in [ML forecasting (M7)](#ml-forecasting-m7). Previously:
+> Details in [ML forecasting (M7)](#ml-forecasting-m7).
 >
 > **M6 — the dispatch optimizer.** A MILP (HiGHS via PuLP) computes the
 > *hindsight-optimal* battery schedule for every covered week under each tariff, using the same
@@ -25,8 +39,7 @@ German day-ahead market data + real PV/battery telemetry (Fenecon Home 10, 8.8 k
 > energy conservation, SoC bounds, and both exclusivities on every solution, and prove the optimum
 > never costs more than a baseline that is feasible for its own problem. CI rebuilds the warehouse,
 > solves, and rebuilds on offline-seeded data, and publishes the
-> [dbt docs site](https://micha-js.github.io/energy-platform/). Forecasting and the dashboard land
-> in later milestones.
+> [dbt docs site](https://micha-js.github.io/energy-platform/). The dashboard lands in M9.
 
 ## Architecture
 
@@ -296,7 +309,7 @@ hourly inputs.
 | `optimal` | the MILP |
 
 ```bash
-just warehouse    # dbt build -> energy-platform dispatch -> dbt build (the only order that works)
+just warehouse    # dbt build -> the Python steps -> dbt build (the only order that works)
 just dispatch     # re-solve on an already-built warehouse
 ```
 
@@ -412,7 +425,7 @@ about which of it is a claim about forecasting and which is a claim about the si
 
 ```bash
 just dbt-seed      # prices, weather, telemetry + synthetic forecast vintages
-just warehouse     # dbt -> dispatch -> forecast -> the two marts that read them back
+just warehouse     # dbt -> dispatch -> forecast -> forward-dispatch -> the read-back marts
 just forecast --target pv_production_kwh   # re-run one target
 ```
 
@@ -521,12 +534,151 @@ Design decisions worth calling out:
   precision, not identical bits. The `config_hash` covers the fit's *inputs*, never the fitted
   bytes.
 
+## Forward-looking dispatch (M8)
+
+M6 asked what a perfect battery schedule would have cost. M7 asked how well tomorrow can be
+predicted. [`src/energy_platform/dispatch/forward.py`](src/energy_platform/dispatch/forward.py) joins
+them: for every Berlin day it plans a schedule from the forecasts available at that day's decision
+time, **executes that plan against the day that actually happened**, and carries the battery's state
+into tomorrow along the executed trajectory rather than the planned one. `mart_dispatch_regret` then
+answers the question the whole platform was built for — of the savings perfect information would
+have produced, how much did real forecasts capture?
+
+| Scenario | What it is |
+| --- | --- |
+| `naive_continuous` | M3's self-consumption policy, SoC carried. What the battery gives you for free |
+| `forecast_driven` | day-ahead plans from M7 forecasts, executed against actuals. The deliverable |
+| `perfect_foresight_plan` | the *same* rolling planner, handed the actuals. A decomposition instrument |
+| `optimal` | the hindsight MILP over the same actuals. The ceiling |
+
+```bash
+just warehouse          # dbt -> dispatch -> forecast -> forward-dispatch -> the four read-back marts
+just forward-dispatch   # re-simulate on an already-built warehouse
+just figure             # regenerate the figure above from the marts
+```
+
+### The headline is negative, and that is the result
+
+Sixty rolling days, 2024-05-02 to 06-30 — the part of the spring window where a model has warmed up.
+
+| | dynamic tariff | static tariff |
+| --- | --- | --- |
+| Available savings (naive → hindsight) | **€0.29** | **€0.00** |
+| Forecast-driven, vs naive | **−€2.84** (worse) | **−€2.86** (worse) |
+| — of which forecast error | €2.86 | €2.86 |
+| — of which day-ahead myopia | €0.27 | €0.00 |
+| **Captured value share** | **−965%** | n/a (no prize) |
+| Attainable share, perfect forecast | **6.7%** | n/a |
+
+**Captured-value share is the number to quote, and here it is deeply negative.** It normalises by the
+size of the prize, so it is comparable across windows of different length and sunniness in a way a
+euro figure is not — and it says plainly that on this system, dispatching on forecasts is worse than
+not dispatching on anything. The euro figures explain why: the prize is 29 cents over two months, and
+being wrong about the weather costs ten times that.
+
+Design decisions worth calling out:
+
+- **The result is reported, never asserted — and that is a deliberate hole in the test suite.**
+  `optimal ≤ forecast_driven` and `optimal ≤ naive` are theorems and both are asserted, in the
+  property tests and in `assert_hindsight_never_costs_more_than_either.sql`. `forecast_driven ≤ naive`
+  is **not** a theorem and is asserted nowhere. Naive self-consumption is *reactive* — it looks at the
+  meter and needs no forecast at all — while a day-ahead plan commits in advance and is wrong whenever
+  the forecast is. Asserting the ordering would have made the suite fail exactly when the platform
+  produced its most honest output, and would have created quiet pressure to improve the seeded data
+  until it passed. `test_a_bad_forecast_may_underperform_naive_and_is_reported_not_asserted` constructs
+  that case on purpose and asserts the *reporting* of it, so the missing assertion is a decision on the
+  record rather than an oversight.
+- **Regret decomposes, and reporting it undivided would have blamed the wrong thing.** A day-ahead
+  controller cannot move energy across a midnight it has already passed; the hindsight optimum can. So
+  `perfect_foresight_plan` runs the identical loop with the actuals substituted for the forecast, and
+  the gap it still leaves is `myopia_cost_eur` — a property of the decision horizon that no model
+  improvement could recover. On the dynamic tariff that is €0.27 of a €0.29 prize: **essentially all
+  of the optimizer's value is multi-day arbitrage, and a day-ahead controller structurally cannot
+  reach it.** The first version of this milestone reported €3.51 of regret as though it were all
+  forecast error. It was not.
+- **The planner's continuation value is not the optimizer's terminal value, and using one for the
+  other cost €19.** M6 prices energy left in the battery at the cheapest non-negative import price the
+  window offered, which is right for a boundary the optimizer meets once. M8's planner meets a
+  boundary *every night*, and tomorrow starts from exactly the state tonight leaves — so it needs a
+  **continuation value**, and that quantity is bounded from below in closed form: storing energy earns
+  `λ·rte` where exporting it earns the feed-in rate, so below `feed_in / rte` the planner sells the
+  battery off every evening. With this catalogue that floor is **9.01 ct/kWh**, and the seeded sweep
+  puts the cliff exactly there — €19.5 of avoidable loss at 8.11 ct, none at 10 ct. Between that floor
+  and M6's hoarding bound the answer is flat (€0.00 static / €0.27 dynamic across 10–34 ct/kWh), so the
+  midpoint of the floor and the median import price is taken: derived from the tariff and the battery,
+  no free constant. `ENERGY_DISPATCH_CONTINUATION_CT_KWH` reproduces the sweep.
+- **Day-ahead prices have no publication timestamp anywhere in the warehouse, so M8 adds the rule.**
+  Prices arrive through the settled-data path; the only temporal provenance a price row carries is
+  `raw.ingestion.fetched_at`, which records when *this platform* fetched the number rather than when
+  the exchange published it. Inventing a per-row instant would be fabricating provenance the source
+  never supplied, so the market's timetable is written down instead — one function, one rule id
+  (`day_ahead_auction_d_minus_1_1245_berlin`), persisted on every run — and `assert_prices_published`
+  turns it into a refusal. The guard that matters is the horizon one: planning day D at D 00:00 is
+  fine, extending the same plan to D+1 reads an auction that clears half a day *after* the decision,
+  and that is exactly how the bug would be written.
+- **The decision time was chosen by M7, not by M8.** `vintage.py` already declared D 00:00
+  Europe/Berlin as "the information set M8 needs", and the synthetic vintage generator stamps its
+  issues at 18:00 the evening before. Moving the decision to, say, D−1 14:00 — which sounds more
+  realistic — would have made every stored vintage on the platform inadmissible and bought nothing.
+  A test asserts the two modules resolve the same instant on four days including both DST Sundays.
+- **The recourse policy is a feasibility projection, and what is actually infeasible is narrower than
+  it looks.** The instinct is that "planned to charge, but the sun did not come out" is the failure
+  case. It is not — the MILP permits grid charging, so the plan is honoured by importing, and the
+  money is worse. That is how a forecast error *should* show up. Only the store's own limits are
+  genuinely unreachable, so execution clips both legs to the SoC band and the power ratings and lets
+  the grid close the balance. That keeps the executed trajectory inside the optimizer's feasible set,
+  which is what makes `optimal ≤ forecast_driven` a theorem rather than a hope. Hourly re-planning
+  (MPC) is the stronger controller and is out of scope: it needs an intraday forecast update this
+  platform does not ingest, and it would measure the re-planner rather than the day-ahead forecast.
+- **`clipped_hours` is zero, and getting there found a real defect.** The flag started as an exact
+  float comparison, so a plan that executed *exactly as written* still reported ~25 clipped hours out
+  of 1440 — the SoC headroom the executor recomputes differs from the solver's in the last bits. A
+  metric reporting recourse where none happened, on the one column a reader would use to judge whether
+  the plans were feasible at all. It now compares at 0.1 Wh, the same quantum the optimizer calls zero.
+- **The simulated span is not the declared window, and every number is over the span.** M7 fits
+  nothing until 28 days of history exist and then refits weekly, so the simulation covers 60 of the
+  spring window's 88 days and neither DST week at all. All four scenarios are re-solved over exactly
+  the simulated hours — comparing a forecast-driven result over 60 days against a naive baseline over
+  88 would be the most flattering possible arrangement and the least meaningful. The two DST weeks
+  appear in the mart with `is_simulated = false` and `not_simulated_reason = 'no_fitted_model'`, not
+  absent: a window that vanishes lets every coverage test downstream pass over something nobody can
+  see is missing, which is precisely how those two weeks went unnoticed in `mart_forecast_eval` at M7.
+- **A day with no usable forecast falls back to self-consumption rather than breaking the chain.**
+  Two of the sixty days have no complete forecast. Dropping them would put a hole in the SoC chain;
+  idling the battery would be a worse controller than the fallback and would misattribute the loss.
+  So M3's own `dispatch_hour` runs those days — legitimately, because naive self-consumption is
+  reactive and needs no knowledge of the future — and `fallback_days` reports how much of the
+  comparison rested on it.
+- **M8 is the first thing to walk M7's provenance interlock.** `save_artifact`/`load_artifact` existed
+  since M7 with *zero* production call sites: the backtest refits per fold and discards, so
+  `artifact_key` was null on every row and the interlock guarded a path nobody used. The serving path
+  fits one model per fold, persists it, and **reads it back through `load_artifact`** before serving —
+  so a synthetic-trained model is refused for real prediction on the production path rather than in a
+  test. The planner also refuses a model whose role is not `model`: on synthetic windows
+  `toy_physical` *is* the generator, and planning with it would land forecast-driven dispatch on top
+  of the hindsight optimum and report a triumph that measured the simulator.
+- **The figure's two panels measure two different quantities, and it says so.** The bars are adjusted
+  net cost — the objective, the only rankable quantity. The cumulative curves are energy cost only,
+  because the terminal credit belongs to the whole span and cannot honestly be attributed to a single
+  day. Their endpoints differ by that credit, and the footnote explains it rather than leaving a
+  reader to assume an error. `scripts/report_regret.py --check` recomputes the plotted numbers and
+  diffs them against a committed JSON sidecar, so CI fails a stale figure on its *values* — never on
+  PNG bytes, which differ across font stacks and would make the check about rendering.
+- **M8 ships a falsifiable prediction, like M7 did.** On real Fenecon telemetry the captured-value
+  share should *rise* — not because the forecasts get better (they will get worse; the synthetic load
+  target is a fixed profile plus i.i.d. noise, so `load_hgb` is already near the irreducible floor)
+  but because the **prize** grows. Real load is spikier and less correlated with real PV than the
+  generator's, so there is more genuine arbitrage for the optimizer to find, and a bigger denominator
+  is what turns −965% into a number worth acting on. If the share stays negative once real telemetry
+  accumulates, the honest conclusion is that this battery should be run on self-consumption and the
+  optimizer left off — which is a result, and one this repo would print.
+
 ## Engineering invariants
 
 - **Idempotent, re-runnable ingestion** — content-hash verification, safe backfills.
 - **Append-only raw zone** — transformations are views/models, never mutations.
 - **No lookahead** — asof joins, time-series CV, forecasts use only data available at
-  prediction time.
+  prediction time, and *decisions* use only prices whose auction had cleared at the decision time.
 - **NaN over fabrication** — missing intervals stay missing and are surfaced by dbt tests.
 - **Reproducible builds** — `uv.lock` committed; CI and the Docker image install `--frozen`.
 - **Claims are scoped to what holds** — three tiers, deliberately not one. Ingestion is
@@ -534,6 +686,10 @@ Design decisions worth calling out:
   hash-guaranteed, because an optimal schedule is not unique. Model training is weaker still:
   bit-reproducible only at a pinned thread count, with no cross-platform claim at all. Stretching
   any one of these to cover the others would make it false.
+- **Orderings are asserted only where they are theorems** — the hindsight optimum is provably never
+  worse than any trajectory feasible for its own problem, and that is enforced in the property tests
+  and in the warehouse. "Forecasting beats doing nothing clever" is an empirical result about a
+  dataset, so it is reported and never asserted; on the seeded data it is currently false.
 
 ## Privacy
 
@@ -563,6 +719,8 @@ just demo-down   # stop and drop the Postgres volume
 | `just dbt-seed`  | offline-seed the raw zone (recorded fixtures)  |
 | `just dbt-build` | build dbt models + run all tests               |
 | `just forecast`  | backtest the forecast models (`OMP_NUM_THREADS=1`) |
+| `just forward-dispatch` | roll the M8 day-ahead simulation over every window |
+| `just figure`    | regenerate the README's three-way comparison figure |
 | `just forecast-reset` | drop synthetic vintages so a changed generator can re-seed |
 | `just dbt-reconcile` | assert the Python tariff engine matches the SQL |
 | `just dbt-docs`  | generate the dbt docs site                     |
@@ -572,12 +730,14 @@ Any backfill accepts `--offline` (or `ENERGY_OFFLINE=1`) to serve SMARD/Open-Met
 fixtures instead of the live APIs — deterministic and network-free, which is how CI and the demo
 seed the stack.
 
-CI runs the full quality gate (against a Postgres service container, so the raw-zone
-idempotency tests execute), a `dbt` job that rebuilds and tests the warehouse on offline-seeded
-data, solves the dispatch optimizer, backtests the forecast models, builds the dispatch and forecast marts, and then runs the warehouse guards —
-the no-lookahead manifest check and the Python↔SQL tariff, dispatch and forecast-metric reconciliations, all of which
-hard-fail rather than skip there — and `docker compose config`
-validation on every push and PR; the dbt docs site publishes to GitHub Pages on merge to main.
+CI runs the full quality gate (against a Postgres service container, so the raw-zone idempotency
+tests execute), a `dbt` job that rebuilds and tests the warehouse on offline-seeded data, solves the
+dispatch optimizer, backtests the forecast models, rolls the forward-looking simulation, builds the
+four read-back marts, asserts the committed README figure still matches the warehouse, and then runs
+the warehouse guards — the no-lookahead manifest check and the Python↔SQL tariff, dispatch and
+forecast-metric reconciliations, all of which hard-fail rather than skip there — and
+`docker compose config` validation on every push and PR; the dbt docs site publishes to GitHub Pages
+on merge to main.
 
 ## License
 

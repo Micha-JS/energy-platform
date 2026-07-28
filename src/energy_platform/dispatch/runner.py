@@ -19,6 +19,7 @@ from energy_platform.dispatch import baselines
 from energy_platform.dispatch.model import DispatchResult, HourInputs
 from energy_platform.dispatch.optimizer import solve_window
 from energy_platform.dispatch.pricing import (
+    CONTINUATION_VALUE_ENV,
     TERMINAL_VALUE_ENV,
     terminal_value_eur_kwh,
     window_prices,
@@ -45,13 +46,28 @@ class WindowSolution:
 
 def terminal_value_override() -> float | None:
     """Read ``ENERGY_DISPATCH_TERMINAL_VALUE_CT_KWH``. ``None`` when unset, as it normally is."""
-    raw = os.environ.get(TERMINAL_VALUE_ENV)
+    return _numeric_env(TERMINAL_VALUE_ENV)
+
+
+def continuation_value_override() -> float | None:
+    """Read ``ENERGY_DISPATCH_CONTINUATION_CT_KWH``. ``None`` when unset, as it normally is.
+
+    M8's planner-side twin of the above, and a separate knob because it is a separate quantity: this
+    one shapes what each daily plan *decides*, the other settles every scenario. The sweep reported
+    in :func:`energy_platform.dispatch.pricing.planning_continuation_eur_kwh` is reproducible from
+    the command line through this variable.
+    """
+    return _numeric_env(CONTINUATION_VALUE_ENV)
+
+
+def _numeric_env(name: str) -> float | None:
+    raw = os.environ.get(name)
     if raw is None:
         return None
     try:
         return float(raw)
     except ValueError as exc:
-        raise ValueError(f"expected a number for {TERMINAL_VALUE_ENV}, got {raw!r}") from exc
+        raise ValueError(f"expected a number for {name}, got {raw!r}") from exc
 
 
 def solve(

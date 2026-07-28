@@ -137,6 +137,27 @@ def test_importing_the_cli_does_not_load_the_heavy_stack() -> None:
     )
 
 
+def test_matplotlib_stays_out_of_the_package_entirely() -> None:
+    """M8's README figure is a script, not a capability of the platform -- enforced, not intended.
+
+    A stricter rule than the one above and a different shape: pvlib and sklearn are *confined* to
+    forecasting/, but matplotlib belongs nowhere under ``src/`` at all. It is a dev dependency
+    (pyproject's ``dev`` group) because plotting is a reporting step, and the moment a module here
+    imports it, `docker compose up` starts shipping a plotting stack and someone starts rendering
+    charts inside the pipeline. ``scripts/report_regret.py`` lives outside the package precisely so
+    this line can be drawn.
+    """
+    offenders = {
+        str(path.relative_to(SRC))
+        for path in sorted(SRC.rglob("*.py"))
+        if "matplotlib" in _import_roots(ast.parse(path.read_text()))
+    }
+    assert not offenders, (
+        "matplotlib is a dev-only reporting dependency and must not be imported anywhere under "
+        f"src/energy_platform -- put the figure in scripts/ instead. Offenders: {sorted(offenders)}"
+    )
+
+
 def test_forecasting_actually_imports_the_stack() -> None:
     """Positive control: the guard must not pass by the package having been deleted or renamed.
 

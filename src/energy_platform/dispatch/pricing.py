@@ -19,6 +19,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final
 
+from energy_platform.config import BatteryConfig
 from energy_platform.dispatch.model import (
     DispatchHour,
     DispatchResult,
@@ -32,6 +33,10 @@ from energy_platform.tariffs.catalog import TariffKind, TariffSpec
 from energy_platform.tariffs.engine import CT_PER_EUR, import_price_ct_kwh
 
 TERMINAL_VALUE_ENV: Final = "ENERGY_DISPATCH_TERMINAL_VALUE_CT_KWH"
+# The planner's continuation value, overridable for the sensitivity sweep the docstring of
+# `planning_continuation_eur_kwh` reports. Separate from the terminal env var because the two are
+# separate quantities: one shapes decisions, the other settles them.
+CONTINUATION_VALUE_ENV: Final = "ENERGY_DISPATCH_CONTINUATION_CT_KWH"
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +127,65 @@ def terminal_value_eur_kwh(prices: WindowPrices, override_ct_kwh: float | None =
     if not priced:
         return 0.0
     return max(min(priced), 0.0)
+
+
+def planning_continuation_eur_kwh(
+    prices: WindowPrices,
+    battery: BatteryConfig,
+    override_ct_kwh: float | None = None,
+) -> float:
+    """What a *rolling* planner should believe a stored kWh at midnight is worth.
+
+    A different question from :func:`terminal_value_eur_kwh`, and answering it with that function
+    is a real mistake -- one this milestone made first and measured second.
+
+    M6 values terminal energy at the cheapest non-negative import price *the window offered*,
+    because there the terminal condition only has to stop the optimiser draining the battery on the
+    last evening of a period it will never see again. M8's planner faces the boundary **every
+    night**, and the boundary is not the end of anything: tomorrow's plan starts from exactly the
+    state tonight's plan leaves. So the number it needs is a *continuation value* -- what the energy
+    will be worth when it is used -- and it is bounded on both sides.
+
+    **The lower bound is exact and derivable.** Storing ``c`` kWh of AC energy puts ``c*sqrt(rte)``
+    in the battery and earns a credit of ``lambda*sqrt(rte)`` per stored kWh, so ``lambda*rte*c``.
+    Exporting the same energy earns ``feed_in*c`` today, for certain. So the planner prefers selling
+    to storing whenever ``lambda*rte < feed_in``, and below ``feed_in / rte`` it empties the battery
+    into the grid every single evening. With this catalogue that is **9.01 ct/kWh**, and it is not a
+    theoretical concern: the seeded sweep shows the perfect-foresight controller giving up ~EUR 25
+    over sixty days at 8.11 ct and nothing at all at 10 ct. The cliff sits exactly where the
+    arithmetic says it does.
+
+    **The upper bound is M6's hoarding argument**, unchanged: credit the energy above what it costs
+    to acquire and the planner buys purely to be paid for holding.
+
+    Between the two the result is flat -- measured across 10..34 ct/kWh on the seeded window, the
+    perfect-foresight controller's cost moves by EUR 0.00 under the static tariff and EUR 0.27 under
+    the dynamic one. So the choice inside the band does not need to be clever, it needs to be
+    *inside*: the midpoint between the sell floor and the median import price is taken, which is
+    derived from the tariff and the battery with no free constant, and sits mid-plateau for both
+    tariffs in the catalogue.
+
+    None of this touches settlement. Every scenario is still settled once, over the whole span, at
+    :func:`terminal_value_eur_kwh` -- this value only ever shapes what the planner *decides*, which
+    is why choosing it badly shows up as worse realised cost rather than as a different accounting
+    of the same dispatch.
+
+    ``override_ct_kwh`` (from ``ENERGY_DISPATCH_CONTINUATION_CT_KWH``) replaces the derivation, for
+    the sensitivity sweep above.
+    """
+    if override_ct_kwh is not None:
+        return override_ct_kwh / CT_PER_EUR
+    rte = battery.round_trip_efficiency
+    # A battery that cannot round-trip has no continuation value to speak of; fall back to the
+    # terminal rule rather than dividing by zero.
+    if rte <= 0.0:
+        return terminal_value_eur_kwh(prices)
+    sell_floor = prices.feed_in_eur_kwh / rte
+    priced = sorted(price for price in prices.import_eur_kwh if price is not None and price >= 0.0)
+    if not priced:
+        return sell_floor
+    median = priced[len(priced) // 2]
+    return max(sell_floor, (sell_floor + median) / 2.0)
 
 
 def settle_window(

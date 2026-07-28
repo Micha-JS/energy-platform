@@ -40,7 +40,9 @@ _SOC_DELTA_DP: Final = 6
 
 
 class Scenario(StrEnum):
-    """The four dispatches M6 compares, per coverage window and consumption tariff.
+    """The dispatches this platform compares, per window and consumption tariff.
+
+    The first four are M6's, solved with hindsight over a whole coverage window.
 
     ``NO_BATTERY`` and ``NAIVE_CONTINUOUS`` are both **feasible points of the optimiser's own
     problem** -- they satisfy every constraint it solves under, starting from the same SoC -- which
@@ -49,12 +51,31 @@ class Scenario(StrEnum):
     violates SoC continuity across day boundaries. It is reported because it is what the warehouse
     actually holds, and deliberately excluded from the optimality assertion because it is not a
     dispatch any single battery could have performed.
+
+    ``FORECAST_DRIVEN`` is M8's, and it is a different kind of thing: not an optimum over anything,
+    but the *realised outcome* of executing day-ahead plans that were made on forecasts. It is
+    feasible for the hindsight problem by construction -- see
+    :mod:`energy_platform.dispatch.execution` -- so ``OPTIMAL`` is provably no more expensive than
+    it either. It carries no such relationship to ``NAIVE_CONTINUOUS`` in *either* direction: a
+    forecast good enough to beat naive self-consumption is an empirical result, and a bad one can
+    legitimately lose. That comparison is reported and never asserted.
+
+    ``PERFECT_FORESIGHT_PLAN`` exists to stop ``FORECAST_DRIVEN``'s shortfall being blamed entirely
+    on the forecast. It is the *same* rolling day-ahead controller -- one plan per day, myopic
+    across midnight, executed under the same recourse policy -- handed the actuals as its forecast.
+    Whatever it still loses against ``OPTIMAL`` is the cost of deciding a day at a time rather than
+    a season at a time, and is a property of the controller that no forecast improvement could
+    recover. Measured on the seeded spring window that is a real fraction of the total regret, so
+    reporting one number without the other would attribute a design choice to model error. Also
+    feasible for the hindsight problem, and for the same reason.
     """
 
     NO_BATTERY = "no_battery"
     NAIVE_TELEMETERED = "naive_telemetered"
     NAIVE_CONTINUOUS = "naive_continuous"
     OPTIMAL = "optimal"
+    FORECAST_DRIVEN = "forecast_driven"
+    PERFECT_FORESIGHT_PLAN = "perfect_foresight_plan"
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,6 +207,19 @@ def round_eur(value: float | None) -> float | None:
     if value is None:
         return None
     rounded = round(value, _EUR_DP)
+    return rounded if rounded != 0 else 0.0
+
+
+def round_kwh(value: float | None) -> float | None:
+    """Quantise energy at the persistence boundary, to 1 Wh -- M3's meter resolution.
+
+    Coarser than :func:`round_soc_delta_kwh` on purpose: this is what a meter reports, that is what
+    settlement multiplies money by. ``-0.0`` is normalised for the same reason :func:`round_eur`
+    does it.
+    """
+    if value is None:
+        return None
+    rounded = round(value, 3)
     return rounded if rounded != 0 else 0.0
 
 

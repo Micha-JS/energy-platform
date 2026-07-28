@@ -142,10 +142,16 @@ def solve_raw(
     battery: BatteryConfig,
     terminal_eur_kwh: float,
     *,
+    soc_start_kwh: float | None = None,
     enforce_battery_exclusivity: bool = True,
     enforce_meter_exclusivity: bool = True,
 ) -> RawSolution:
     """Build and solve the dispatch program, returning the solver's raw values.
+
+    ``soc_start_kwh`` defaults to :func:`initial_soc_kwh`, which is what M6 always solves from and
+    what M3's generator starts every day at. M8's rolling simulation passes the previous day's
+    *executed* terminal state instead -- see :func:`solve_window` for why the terminal valuation
+    survives that and the "vacuous constraint" argument does not.
 
     The two exclusivity flags can be dropped independently. Neither is a supported production mode:
     they exist so ``tests/dispatch/test_negative_prices.py`` can show what each binary is for, one
@@ -153,6 +159,7 @@ def solve_raw(
     single battery or single meter could perform.
     """
     _validate(battery)
+    start_kwh = _start_soc(battery, soc_start_kwh)
     efficiency = discharge_efficiency(battery)
     soc_min_kwh = battery.soc_min * battery.capacity_kwh
     soc_max_kwh = battery.soc_max * battery.capacity_kwh
@@ -171,7 +178,7 @@ def solve_raw(
     grid_export: dict[int, pulp.LpVariable] = {}
     objective_terms: list[pulp.LpAffineExpression] = []
 
-    previous: pulp.LpAffineExpression | float = initial_soc_kwh(battery)
+    previous: pulp.LpAffineExpression | float = start_kwh
 
     for index, hour in enumerate(hours):
         import_eur_kwh = prices.import_eur_kwh[index]
@@ -230,7 +237,7 @@ def solve_raw(
     # Without this the optimiser empties the battery on the last evening and books the proceeds as
     # savings -- an artefact of where the window happens to end, not a decision worth anything.
     terminal = terminal_eur_kwh * efficiency
-    problem += pulp.lpSum(objective_terms) - terminal * (previous - initial_soc_kwh(battery))
+    problem += pulp.lpSum(objective_terms) - terminal * (previous - start_kwh)
 
     status = problem.solve(_configured_solver())
     return RawSolution(
@@ -249,6 +256,8 @@ def solve_window(
     prices: WindowPrices,
     battery: BatteryConfig,
     terminal_eur_kwh: float,
+    *,
+    soc_start_kwh: float | None = None,
 ) -> DispatchResult:
     """Solve one window under one consumption tariff and settle the result.
 
@@ -257,8 +266,24 @@ def solve_window(
     import/export exclusivity and SoC continuity *exactly* rather than to solver tolerance. The
     solver's own grid flows are checked against the derived ones first, so this normalises floating
     point rather than papering over a wrong answer -- a real disagreement raises.
+
+    **Starting from a carried state of charge.** ``soc_start_kwh`` defaults to ``soc_min *
+    capacity``, which is where M6 and M3 both begin. M8 plans each day from the previous day's
+    executed terminal state, so it passes that instead. Only one strand of the M6 reasoning is
+    specific to the default and it is the one that was already discarded: ``SoC_end >= SoC_start``
+    is vacuous *because* the window starts at the SoC lower bound, and above ``soc_min`` it would
+    stop being vacuous and start being a real -- and wrong -- constraint. The terminal *valuation*
+    that replaced it does not depend on where the window starts: it credits the delta relative to
+    ``soc_start_kwh``, at a rate low enough that acquiring energy purely to be credited for it still
+    loses money. So a carried start changes the number this returns, as it must, without changing
+    what the number means.
+
+    What the caller keeps responsibility for is comparability. Two scenarios may only be ranked
+    against each other if they were solved from the same ``soc_start_kwh`` and settled at the same
+    terminal rate, which is why :func:`energy_platform.dispatch.runner.solve` derives both once for
+    all its scenarios and why M8's simulation settles its three over one span rather than per day.
     """
-    solution = solve_raw(hours, prices, battery, terminal_eur_kwh)
+    solution = solve_raw(hours, prices, battery, terminal_eur_kwh, soc_start_kwh=soc_start_kwh)
     if solution.status != "Optimal":
         raise DispatchError(
             f"solver returned {solution.status!r} for tariff {prices.tariff_id!r} over "
@@ -268,7 +293,8 @@ def solve_window(
     efficiency = discharge_efficiency(battery)
     soc_min_kwh = battery.soc_min * battery.capacity_kwh
     soc_max_kwh = battery.soc_max * battery.capacity_kwh
-    soc_kwh = initial_soc_kwh(battery)
+    start_kwh = _start_soc(battery, soc_start_kwh)
+    soc_kwh = start_kwh
 
     solved = {
         index: (
@@ -321,12 +347,31 @@ def solve_window(
         prices,
         hours,
         flows,
-        soc_start_kwh=initial_soc_kwh(battery),
+        soc_start_kwh=start_kwh,
         terminal_eur_kwh=terminal_eur_kwh,
         discharge_efficiency=efficiency,
         status=solution.status,
         solver=SOLVER,
     )
+
+
+def _start_soc(battery: BatteryConfig, soc_start_kwh: float | None) -> float:
+    """Resolve the start state, refusing one the battery could not have been in.
+
+    An out-of-band start is not a number to clamp: it means the caller's SoC chain has drifted out
+    of the physical band, and silently pulling it back would hide that while producing a schedule
+    whose first hour does not continue from where the previous one ended.
+    """
+    if soc_start_kwh is None:
+        return initial_soc_kwh(battery)
+    lower = battery.soc_min * battery.capacity_kwh
+    upper = battery.soc_max * battery.capacity_kwh
+    if not lower - _SOLVER_TOLERANCE_KWH <= soc_start_kwh <= upper + _SOLVER_TOLERANCE_KWH:
+        raise DispatchError(
+            f"start state of charge {soc_start_kwh:.6f} kWh is outside the battery's band "
+            f"[{lower:.6f}, {upper:.6f}]"
+        )
+    return min(max(soc_start_kwh, lower), upper)
 
 
 def _idle(hour: HourInputs, soc_kwh: float) -> HourFlows | None:

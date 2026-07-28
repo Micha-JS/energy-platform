@@ -110,15 +110,36 @@ forecast-reset:
     docker compose exec -T postgres psql -U dagster -d dagster -c \
         "delete from raw.forecast_ingestion where source = 'synthetic'"
 
-# The full warehouse in dependency order: models, then the two Python steps, then the marts that
+# Roll the M8 day-ahead simulation over every declared coverage window: plan each Berlin day from
+# the forecasts available at its decision time (D 00:00 Europe/Berlin), execute that plan against
+# the actuals, and write the three-way comparison to the `derived` schema. Runs after `forecast`
+# and before the regret marts -- same sandwich as `dispatch`, one layer later.
+#
+# OMP_NUM_THREADS=1 for the same reason `forecast` sets it: this fits models too, one per fold, and
+# histogram accumulation is threaded.
+#
+# --from/--to simulates an ad-hoc window and reports it WITHOUT writing, exactly as the other two do.
+# Example: just forward-dispatch --tariff dynamic_2024
+forward-dispatch *ARGS:
+    OMP_NUM_THREADS=1 uv run energy-platform forward-dispatch {{ARGS}}
+
+# Regenerate the README's three-way comparison figure from the regret marts. Needs a built
+# warehouse. matplotlib is a dev dependency, never a runtime one -- see pyproject.
+figure *ARGS:
+    uv run python scripts/report_regret.py {{ARGS}}
+
+# The full warehouse in dependency order: models, then the three Python steps, then the marts that
 # read what they wrote. This is what CI runs, and the only sequence that works on an empty database.
 warehouse:
     uv run --project dbt dbt build --project-dir dbt --profiles-dir dbt \
-        --exclude mart_dispatch_comparison mart_forecast_eval
+        --exclude mart_dispatch_comparison mart_forecast_eval mart_dispatch_regret \
+        mart_forward_dispatch_daily
     uv run energy-platform dispatch
     OMP_NUM_THREADS=1 uv run energy-platform forecast
+    OMP_NUM_THREADS=1 uv run energy-platform forward-dispatch
     uv run --project dbt dbt build --project-dir dbt --profiles-dir dbt \
-        --select mart_dispatch_comparison mart_forecast_eval
+        --select mart_dispatch_comparison mart_forecast_eval mart_dispatch_regret \
+        mart_forward_dispatch_daily
 
 # Assert the Python tariff engine and the dbt tariff macro compute the same money, hour by hour,
 # over the built warehouse -- plus the no-lookahead manifest guard. Needs `just dbt-build` first;

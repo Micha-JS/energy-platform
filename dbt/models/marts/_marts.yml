@@ -410,3 +410,214 @@ models:
           - accepted_values: {values: ["synthetic", "real"]}
       - name: config_hash
         tests: [not_null]
+
+  - name: mart_dispatch_regret
+    description: >
+      THE HEADLINE. Of the savings a perfectly-informed battery schedule would have produced, how
+      much did dispatch driven by real day-ahead forecasts actually capture? One row per coverage
+      window, site and consumption tariff -- wide rather than per-scenario, because regret and
+      captured share are relations *between* scenarios.
+
+      Three costs, all objective_eur over the same simulated span, from the same starting state of
+      charge, settled at the same terminal rate: naive_continuous (the baseline a household gets
+      for free), forecast_driven (what the platform can really deliver) and hindsight (the ceiling
+      nobody reaches).
+
+      THE SPAN IS NOT THE WINDOW. The forecast models need min_train_days of warm-up, so the
+      simulation starts later than the window it belongs to; sim_start/sim_end/simulated_days
+      record what was covered and expected_hours is the Berlin calendar length of THAT span. A
+      window with no fitted model is present with is_simulated = false and a reason, never absent.
+
+      QUOTE captured_value_share, NOT A EURO FIGURE. A euro total over a 60-day span is not
+      comparable to one over a year or between a sunny window and a dark one; the share normalises
+      by the size of the prize. It is bounded above by 1 because hindsight <= forecast_driven is a
+      theorem -- so a value above 1 is a bug, not a triumph -- and it is deliberately NOT bounded
+      below, because a bad forecast can legitimately underperform naive dispatch and that result is
+      reported rather than suppressed. See assert_hindsight_never_costs_more_than_either for which
+      orderings are theorems and which is emphatically not.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [window_start, window_end, region, tariff_id]
+    columns:
+      - name: window_start
+        tests: [not_null]
+      - name: window_end
+        tests: [not_null]
+      - name: region
+        tests: [not_null]
+      - name: tariff_id
+        description: >
+          The consumption tariff, or the sentinel '*' on a window that could not be simulated --
+          the reason is about the models, not the money, so it is filed once rather than per tariff.
+        tests: [not_null]
+      - name: is_simulated
+        tests: [not_null]
+      - name: not_simulated_reason
+        description: Why a declared window produced no simulation. Null exactly when is_simulated.
+        tests:
+          - accepted_values:
+              values: ["no_fitted_model", "no_hours"]
+              config: {where: "not_simulated_reason is not null"}
+      - name: simulated_days
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 1, config: {where: "is_simulated"}}
+      - name: fallback_days
+        description: >
+          Days inside the span with no usable forecast, dispatched by naive self-consumption
+          instead. A large value means the comparison is measuring the fallback, not the forecast.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0}
+      - name: clipped_hours
+        description: >
+          Hours the plan asked for more than the battery could do and was projected back to
+          feasibility. Not an error -- it is the recourse policy working -- but a high count means
+          the plans were systematically infeasible against reality.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0}
+      - name: naive_cost_eur
+        tests: [not_null: {config: {where: "is_simulated"}}]
+      - name: forecast_driven_cost_eur
+        tests: [not_null: {config: {where: "is_simulated"}}]
+      - name: perfect_foresight_cost_eur
+        description: >
+          The same rolling day-ahead controller handed the actuals as its forecast. Not a
+          deliverable -- the instrument that splits regret into forecast error and myopia.
+        tests: [not_null: {config: {where: "is_simulated"}}]
+      - name: hindsight_cost_eur
+        tests: [not_null: {config: {where: "is_simulated"}}]
+      - name: regret_eur
+        description: >
+          The whole shortfall against perfect information. Non-negative by theorem, to within the
+          settlement rounding budget the singular test derives. Equals
+          forecast_error_cost_eur + myopia_cost_eur.
+        tests:
+          - dbt_utils.accepted_range:
+              {min_value: -0.00001, config: {where: "regret_eur is not null"}}
+      - name: forecast_error_cost_eur
+        description: >
+          The part of regret that better forecasts could remove. Non-negative by theorem: the
+          perfect-foresight controller is the same controller with strictly better information.
+        tests:
+          - dbt_utils.accepted_range:
+              {min_value: -0.00001, config: {where: "forecast_error_cost_eur is not null"}}
+      - name: myopia_cost_eur
+        description: >
+          The part of regret no forecast could remove -- the price of deciding one day at a time
+          instead of over the whole span. Non-negative by theorem.
+        tests:
+          - dbt_utils.accepted_range:
+              {min_value: -0.00001, config: {where: "myopia_cost_eur is not null"}}
+      - name: available_savings_eur
+        description: The prize -- what perfect foresight was worth over naive dispatch.
+      - name: realised_savings_eur
+        description: What forecast-driven dispatch actually delivered over naive. May be negative.
+      - name: captured_value_share
+        description: >
+          realised_savings_eur / available_savings_eur. Null where the prize was zero -- a window
+          whose battery is PV-saturated has nothing to optimise, and a percentage of nothing is
+          arithmetic dressed up as a result. NO LOWER BOUND IS TESTED, on purpose.
+        tests:
+          - dbt_utils.accepted_range:
+              {max_value: 1.00001, config: {where: "captured_value_share is not null"}}
+      - name: attainable_value_share
+        description: >
+          What a day-ahead controller with PERFECT information would have captured. The ceiling on
+          captured_value_share that no forecasting work could lift, and the honest thing to read
+          the headline against. Same absence of a lower bound, for the same reason.
+        tests:
+          - dbt_utils.accepted_range:
+              {max_value: 1.00001, config: {where: "attainable_value_share is not null"}}
+      - name: pv_model_key
+        tests: [not_null: {config: {where: "is_simulated"}}]
+      - name: load_model_key
+        tests: [not_null: {config: {where: "is_simulated"}}]
+      - name: decision_rule_id
+        tests: [not_null]
+      - name: price_publication_rule_id
+        tests: [not_null]
+      - name: selection_rule_id
+        tests: [not_null]
+      - name: training_data_source
+        tests:
+          - not_null
+          - accepted_values: {values: ["synthetic", "real"]}
+      - name: expected_hours
+        description: Berlin calendar hours in the SIMULATED span, never in the declared window.
+        tests:
+          - dbt_utils.accepted_range: {min_value: 1, config: {where: "is_simulated"}}
+      - name: completeness_ratio
+        tests:
+          - dbt_utils.accepted_range:
+              {min_value: 0, max_value: 1, config: {where: "is_simulated"}}
+      - name: scenario_rows
+        description: >
+          How many scenarios this comparison was assembled from -- three when simulated, one for a
+          not-simulated marker. A different value means a scenario failed to write.
+        tests:
+          - not_null
+          - accepted_values: {values: [1, 4], quote: false}
+
+  - name: mart_forward_dispatch_daily
+    description: >
+      The rolling simulation day by day: three scenarios, one row each per simulated Berlin day,
+      with the cumulative cost curve the README figure plots. The running total lives here rather
+      than in the plotting script so the figure cannot drift from the mart.
+
+      Only forecast_driven was decided day by day; the two reference scenarios are solved once over
+      the span and merely settled per day, so they carry plan_status = 'not_planned' and null SoC
+      and fit-day columns rather than a guess.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            [window_start, window_end, region, tariff_id, scenario, local_date]
+    columns:
+      - name: local_date
+        tests: [not_null]
+      - name: scenario
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["naive_continuous", "forecast_driven", "perfect_foresight_plan", "optimal"]
+      - name: plan_status
+        description: >
+          How this day's dispatch was arrived at. 'planned' means a day-ahead solve on forecasts;
+          'fallback_naive' means the forecast was unusable and the controller self-consumed;
+          'not_planned' means the scenario has no plan at all.
+        tests:
+          - not_null
+          - accepted_values: {values: ["planned", "fallback_naive", "not_planned"]}
+      - name: sim_day
+        description: 1-based day index within the simulated span, so scenarios share an x-axis.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 1}
+      - name: soc_start_kwh
+        tests:
+          - not_null: {config: {where: "scenario = 'forecast_driven'"}}
+          - dbt_utils.accepted_range:
+              {min_value: 0, config: {where: "soc_start_kwh is not null"}}
+      - name: soc_end_kwh
+        tests:
+          - not_null: {config: {where: "scenario = 'forecast_driven'"}}
+          - dbt_utils.accepted_range: {min_value: 0, config: {where: "soc_end_kwh is not null"}}
+      - name: clipped_hours
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0}
+      - name: pv_model_age_days
+        description: >
+          How stale the model that planned this day was, in days since its fold. Zero on a refit
+          day, up to fold_stride_days - 1 the day before the next -- the cost of not retraining
+          nightly, made visible rather than assumed negligible.
+        tests:
+          - dbt_utils.accepted_range:
+              {min_value: 0, config: {where: "pv_model_age_days is not null"}}
+      - name: expected_hours
+        tests:
+          - not_null
+          - accepted_values: {values: [23, 24, 25], quote: false}
+      - name: is_partial_day
+        tests: [not_null]

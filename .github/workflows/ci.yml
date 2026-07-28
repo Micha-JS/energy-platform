@@ -125,12 +125,13 @@ jobs:
           echo "$out" | grep -Eq "loaded=0 noop=[0-9]+ revision=0 .* failures=0" \
             || { echo "::error::re-seed was not an all-noop -- ingestion is not idempotent"; exit 1; }
       - name: dbt build (models + all tests, incl. DST singular tests)
-        # Everything except the dispatch mart, which reads tables the optimiser has not written yet.
-        # The optimiser consumes a mart and produces a source, so it sits between two dbt runs --
-        # `just warehouse` is this same sequence for local use.
+        # Everything except the read-back marts, which read tables the Python steps have not written
+        # yet. Each of those steps consumes a mart and produces a source, so they sit between two
+        # dbt runs -- `just warehouse` is this same sequence for local use.
         run: |
           uv run --project dbt dbt build --project-dir dbt --profiles-dir dbt \
-            --exclude mart_dispatch_comparison mart_forecast_eval
+            --exclude mart_dispatch_comparison mart_forecast_eval mart_dispatch_regret \
+            mart_forward_dispatch_daily
       - name: Solve the battery dispatch optimiser over every coverage window
         # Reads mart_hourly_energy, writes the `derived` schema. No network, no solver licence:
         # HiGHS ships as a wheel. Windows come from dbt_project.yml's coverage_windows var, read by
@@ -146,10 +147,24 @@ jobs:
         env:
           OMP_NUM_THREADS: "1"
         run: uv run energy-platform forecast
-      - name: dbt build (the dispatch and forecast marts + their tests)
+      - name: Roll the forward-looking dispatch simulation (M8)
+        # Plans each Berlin day from the forecasts available at D 00:00 Europe/Berlin, executes the
+        # plan against the actuals, and writes the three-way comparison. Last of the three Python
+        # steps: it reads the energy mart and the weather vintages, and fits a model per fold, which
+        # is why it pins the thread count for the same reason the backtest does.
+        env:
+          OMP_NUM_THREADS: "1"
+        run: uv run energy-platform forward-dispatch
+      - name: dbt build (the read-back marts + their tests)
         run: |
           uv run --project dbt dbt build --project-dir dbt --profiles-dir dbt \
-            --select mart_dispatch_comparison mart_forecast_eval
+            --select mart_dispatch_comparison mart_forecast_eval mart_dispatch_regret \
+            mart_forward_dispatch_daily
+      - name: Assert the committed README figure still matches the warehouse
+        # Values, not pixels. The script recomputes what it would plot and diffs it against the
+        # committed JSON sidecar, so a stale figure fails here instead of quietly misreporting the
+        # headline -- without ever asserting on PNG bytes, which differ across font stacks.
+        run: uv run python scripts/report_regret.py --check
       - name: Warehouse guards (no-lookahead + tariff and dispatch reconciliations)
         # All three need a built warehouse, so they run here rather than in `quality`, where they
         # skip. ENERGY_REQUIRE_DBT turns those skips into failures: a reconciliation that silently
