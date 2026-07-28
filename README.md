@@ -604,9 +604,15 @@ Design decisions worth calling out:
   `λ·rte` where exporting it earns the feed-in rate, so below `feed_in / rte` the planner sells the
   battery off every evening. With this catalogue that floor is **9.01 ct/kWh**, and the seeded sweep
   puts the cliff exactly there — €19.5 of avoidable loss at 8.11 ct, none at 10 ct. Between that floor
-  and M6's hoarding bound the answer is flat (€0.00 static / €0.27 dynamic across 10–34 ct/kWh), so the
-  midpoint of the floor and the median import price is taken: derived from the tariff and the battery,
-  no free constant. `ENERGY_DISPATCH_CONTINUATION_CT_KWH` reproduces the sweep.
+  and the **median** import price the answer is flat (€0.00 static / €0.27 dynamic across 10–34 ct/kWh),
+  so the midpoint of the two is taken: derived from the tariff and the battery, no free constant. The
+  upper bound is the median and deliberately *not* M6's minimum, because the two functions bound
+  different things — M6 credits energy at the end of a window it will never see again, while a rolling
+  planner's energy is going to be used *tomorrow*, and the cheapest hour of a sixty-day window is not an
+  estimate of that. Clamping to the minimum was tried and measured: under the dynamic tariff the
+  cheapest retail hour is 6.72 ct/kWh, *below* the 9.01 ct floor, so the band inverts, the planner lands
+  on the cliff, and €3.13 of regret becomes €19.97. `ENERGY_DISPATCH_CONTINUATION_CT_KWH` reproduces
+  both sweeps.
 - **Day-ahead prices have no publication timestamp anywhere in the warehouse, so M8 adds the rule.**
   Prices arrive through the settled-data path; the only temporal provenance a price row carries is
   `raw.ingestion.fetched_at`, which records when *this platform* fetched the number rather than when
